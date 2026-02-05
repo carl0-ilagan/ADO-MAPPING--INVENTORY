@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { LoginPage } from '@/components/LoginPage';
 import { Dashboard } from '@/components/Dashboard';
-import { MappingForm } from '@/components/MappingForm';
+import { MappingForm } from '@/components/MappingFormClean';
 import { RightSplitModal } from '@/components/RightSplitModal';
 import { onAuthStateChangeListener, signOutUser } from '@/lib/firebaseAuth.js';
 import { getUserMappings, addMapping, deleteMapping } from '@/lib/firebaseDB.js';
