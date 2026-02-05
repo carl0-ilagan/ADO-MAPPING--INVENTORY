@@ -303,7 +303,7 @@ function SearchableSelect({ options, selected, onChange, placeholder, multi = fa
               className="w-full px-3 py-2 border-2 border-[#0A2D55]/10 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition shadow-sm"
             />
           </div>
-          <div className="p-2 max-h-72 overflow-y-auto">
+          <div className="p-2 max-h-72 overflow-y-auto hide-scrollbar">
             {filtered.length > 0 ? (
               filtered.map((option) => (
                 <button
@@ -570,7 +570,7 @@ export function MappingForm({ onBack, onSubmit, isModal = false }) {
 
           <form onSubmit={handleValidateAndSubmit} className={cn('flex-1 flex flex-col min-h-0', isModal ? 'p-3 sm:p-4' : 'p-5 sm:p-7')}>
             {/* Single column unified form - with scrolling content */}
-            <div className={cn('flex-1 overflow-y-auto pr-2', isModal ? 'space-y-2' : 'space-y-6')}>
+            <div className={cn('flex-1 overflow-y-auto pr-2 hide-scrollbar', isModal ? 'space-y-2' : 'space-y-6')}>
               {/* Section 1: Mapping Info */}
               <div className={cn(isModal ? 'space-y-2 animate-section-1' : 'space-y-4')}>
                 <div className={isModal ? 'flex items-center gap-3 mb-2' : 'flex items-center gap-4 mb-4'}>

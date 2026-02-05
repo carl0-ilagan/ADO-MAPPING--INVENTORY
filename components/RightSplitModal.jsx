@@ -114,7 +114,7 @@ export function RightSplitModal({
               >
                 <XIcon className="h-5 w-5" />
               </DialogPrimitive.Close>
-              <div className="flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden">
+              <div className="flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden hide-scrollbar">
                 <div className="w-full h-full flex-1 flex flex-col min-h-0 px-3 py-3 sm:px-4 sm:py-4">
                   {primaryChildren}
                 </div>
