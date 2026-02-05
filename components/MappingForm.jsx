@@ -29,20 +29,66 @@ const locationData = {
       { id: 1, name: 'Ilocos Norte' },
       { id: 2, name: 'Ilocos Sur' },
       { id: 3, name: 'La Union' },
+      { id: 11, name: 'Pangasinan' },
     ],
     2: [
       { id: 4, name: 'Cagayan' },
       { id: 5, name: 'Isabela' },
       { id: 6, name: 'Nueva Vizcaya' },
+      { id: 12, name: 'Quirino' },
+      { id: 13, name: 'Batanes' },
     ],
     3: [
       { id: 7, name: 'Abra' },
       { id: 8, name: 'Benguet' },
       { id: 9, name: 'Ifugao' },
       { id: 10, name: 'Kalinga' },
+      { id: 14, name: 'Apayao' },
+      { id: 15, name: 'Mountain Province' },
+    ],
+    4: [
+      { id: 16, name: 'Aurora' },
+      { id: 17, name: 'Bataan' },
+      { id: 18, name: 'Bulacan' },
+      { id: 19, name: 'Nueva Ecija' },
+      { id: 20, name: 'Pampanga' },
+      { id: 21, name: 'Tarlac' },
+      { id: 22, name: 'Zambales' },
+    ],
+    8: [
+      { id: 23, name: 'Aklan' },
+      { id: 24, name: 'Antique' },
+      { id: 25, name: 'Capiz' },
+      { id: 26, name: 'Guimaras' },
+      { id: 27, name: 'Iloilo' },
+      { id: 28, name: 'Negros Occidental' },
     ],
   },
   municipalities: {
+    16: [ // Aurora
+      { id: 101, name: 'Baler' },
+      { id: 102, name: 'Casiguran' },
+      { id: 103, name: 'Dilasag' },
+      { id: 104, name: 'Dinalungan' },
+      { id: 105, name: 'Dingalan' },
+      { id: 106, name: 'Dipaculao' },
+      { id: 107, name: 'Maria Aurora' },
+      { id: 108, name: 'San Luis' },
+    ],
+    17: [ // Bataan
+      { id: 201, name: 'Abucay' },
+      { id: 202, name: 'Bagac' },
+      { id: 203, name: 'Balanga' },
+      { id: 204, name: 'Dinalupihan' },
+      { id: 205, name: 'Hermosa' },
+      { id: 206, name: 'Limay' },
+      { id: 207, name: 'Mariveles' },
+      { id: 208, name: 'Morong' },
+      { id: 209, name: 'Orani' },
+      { id: 210, name: 'Orion' },
+      { id: 211, name: 'Pilar' },
+      { id: 212, name: 'Samal' },
+    ],
     1: [
       { id: 1, name: 'Laoag City' },
       { id: 2, name: 'Batac' },
@@ -57,8 +103,68 @@ const locationData = {
       { id: 7, name: 'Tuguegarao' },
       { id: 8, name: 'Cabanatuan' },
     ],
+    23: [ // Gabaldon, Nueva Ecija
+      { id: 301, name: 'Gabaldon' },
+    ],
   },
   barangays: {
+    // Aurora - San Luis
+    108: [
+      { id: 1001, name: 'Diteki' },
+      { id: 1002, name: 'Ditumabo' },
+      { id: 1003, name: 'Nonong Senior' },
+      { id: 1004, name: 'L. Pimentel' },
+      { id: 1005, name: 'Dibalo' },
+      { id: 1006, name: 'Dibayabay' },
+      { id: 1007, name: 'Dibut' },
+      { id: 1008, name: 'Dikapinisan' },
+    ],
+    // Bataan - Morong
+    208: [
+      { id: 2001, name: 'Binaritan' },
+      { id: 2002, name: 'Nagbalayong' },
+      { id: 2003, name: 'Sabang' },
+    ],
+    // Bataan - Dinalupihan
+    204: [
+      { id: 2101, name: 'Tubo-Tubo' },
+      { id: 2102, name: 'Payangan' },
+      { id: 2103, name: 'Bayan-Bayanan' },
+    ],
+    // Bataan - Bagac and others
+    202: [
+      { id: 2201, name: 'Banawang' },
+      { id: 2202, name: 'A. Ricardo' },
+      { id: 2203, name: 'Binukawan Tanato' },
+      { id: 2204, name: 'Dangcol' },
+      { id: 2205, name: 'Munting Batangas Salian' },
+      { id: 2206, name: 'Gayintin' },
+    ],
+    203: [ // Balanga
+      { id: 2301, name: 'Balanga Poblacion' },
+    ],
+    201: [ // Abucay
+      { id: 2401, name: 'Abucay Poblacion' },
+    ],
+    209: [ // Orani
+      { id: 2501, name: 'Samal Orani' },
+    ],
+    // Nueva Ecija - Gabaldon
+    301: [
+      { id: 3001, name: 'Calabasa' },
+      { id: 3002, name: 'Ligaya' },
+    ],
+    // CAR - Multiple municipalities
+    7: [ // San Roque, Sto Cristo, etc. 
+      { id: 4001, name: 'Binagbag' },
+      { id: 4002, name: 'Marungko' },
+      { id: 4003, name: 'Sulucan' },
+      { id: 4004, name: 'San Roque' },
+      { id: 4005, name: 'Sto Cristo' },
+      { id: 4006, name: 'Sta Lucia' },
+      { id: 4007, name: 'Baybay' },
+      { id: 4008, name: 'Banaban' },
+    ],
     1: [
       { id: 1, name: 'Barangay 1' },
       { id: 2, name: 'Barangay 2' },
@@ -72,6 +178,11 @@ const locationData = {
 };
 
 const iccOptions = [
+  'ALTA/DUMAGAT',
+  'AYTA AMBALA',
+  'MAGBUKON AYTA',
+  'AYTA MAGBUKUN',
+  'DUMAGAT',
   'Igorot',
   'Cordillera People',
   'Lumad',
@@ -84,6 +195,10 @@ const iccOptions = [
 ];
 
 const ipGroupOptions = [
+  'ALTA',
+  'DUMAGAT',
+  'AYTA',
+  'MAGBUKON',
   'Ifugao',
   'Kalinga',
   'Kankanaey',
@@ -246,6 +361,118 @@ export function MappingForm({ onBack, onSubmit, isModal = false }) {
   });
 
   const [errors, setErrors] = useState({});
+  const [showSampleMenu, setShowSampleMenu] = useState(false);
+  const sampleMenuRef = useRef(null);
+
+  // Close sample menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (showSampleMenu && sampleMenuRef.current && !sampleMenuRef.current.contains(e.target)) {
+        setShowSampleMenu(false);
+      }
+    };
+    
+    if (showSampleMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showSampleMenu]);
+
+  // Sample data presets based on the spreadsheet
+  const sampleDataPresets = [
+    {
+      name: 'Sample 1: Aurora - San Luis',
+      data: {
+        surveyNumber: 'ADs-0301-0027-Gni',
+        totalArea: '42697.1993',
+        regionId: 4,
+        provinceId: 16,
+        municipalityIds: [108],
+        barangayIds: [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008],
+        iccNames: ['ALTA/DUMAGAT'],
+        ipGroupNames: ['ALTA', 'DUMAGAT'],
+        remarks: '',
+      }
+    },
+    {
+      name: 'Sample 2: Bataan - Dinalupihan',
+      data: {
+        surveyNumber: 'ADs-0302-0026-Gni',
+        totalArea: '5167.0486',
+        regionId: 4,
+        provinceId: 17,
+        municipalityIds: [204],
+        barangayIds: [2101, 2102, 2103],
+        iccNames: ['AYTA AMBALA'],
+        ipGroupNames: ['AYTA'],
+        remarks: '',
+      }
+    },
+    {
+      name: 'Sample 3: Bataan - Morong',
+      data: {
+        surveyNumber: 'ADs-0302-0020-Gni',
+        totalArea: '12231.1026',
+        regionId: 4,
+        provinceId: 17,
+        municipalityIds: [208],
+        barangayIds: [2001, 2002, 2003],
+        iccNames: ['MAGBUKON AYTA'],
+        ipGroupNames: ['MAGBUKON', 'AYTA'],
+        remarks: 'void',
+      }
+    },
+    {
+      name: 'Sample 4: Bataan - Bagac',
+      data: {
+        surveyNumber: 'ADs-0302-0025-Gni',
+        totalArea: '14977.1478',
+        regionId: 4,
+        provinceId: 17,
+        municipalityIds: [202],
+        barangayIds: [2201, 2202, 2203, 2204, 2205, 2206],
+        iccNames: ['AYTA MAGBUKUN'],
+        ipGroupNames: ['AYTA', 'MAGBUKON'],
+        remarks: '3 COPIES',
+      }
+    },
+  ];
+
+  // Load sample data function
+  const loadSampleData = (preset) => {
+    const { data } = preset;
+    const region = locationData.regions.find(r => r.id === data.regionId);
+    const province = locationData.provinces[data.regionId]?.find(p => p.id === data.provinceId);
+    const municipalities = data.municipalityIds.map(id => 
+      locationData.municipalities[data.provinceId]?.find(m => m.id === id)
+    ).filter(Boolean);
+    
+    // Get barangays from all selected municipalities
+    let allBarangays = [];
+    municipalities.forEach(mun => {
+      const barangaysForMun = data.barangayIds.map(id => 
+        locationData.barangays[mun.id]?.find(b => b.id === id)
+      ).filter(Boolean);
+      allBarangays = [...allBarangays, ...barangaysForMun];
+    });
+    
+    const icc = data.iccNames.map((name, idx) => ({ id: idx, name }));
+    const ipGroup = data.ipGroupNames.map((name, idx) => ({ id: idx, name }));
+    
+    setFormData({
+      surveyNumber: data.surveyNumber,
+      totalArea: data.totalArea,
+      selectedRegion: region,
+      selectedProvince: province,
+      municipalities: municipalities,
+      barangays: allBarangays,
+      icc: icc,
+      ipGroup: ipGroup,
+      remarks: data.remarks,
+    });
+    setErrors({});
+    setShowSampleMenu(false);
+  };
 
   // Filtered options based on cascading selections
   const provinces = useMemo(() => {
@@ -307,8 +534,38 @@ export function MappingForm({ onBack, onSubmit, isModal = false }) {
         <div className={`bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col flex-1 min-h-0 border border-[#0A2D55]/5 ${isModal ? 'rounded-t-3xl border-t-4 border-[#F2C94C]' : ''}`}>
           {/* Modern header with gradient background */}
           <div className={cn('border-b border-[#0A2D55]/8 bg-gradient-to-r from-[#0A2D55]/3 via-[#F2C94C]/5 to-transparent flex-shrink-0', isModal ? 'px-4 py-3 animate-header' : 'px-5 sm:px-7 py-5 sm:py-6')}>
-            <h1 className={cn('font-bold bg-gradient-to-r from-[#0A2D55] to-[#0A2D55] bg-clip-text text-transparent', isModal ? 'text-lg' : 'text-xl sm:text-2xl')}>Add New Mapping</h1>
-            {!isModal && <p className="text-sm text-[#0A2D55]/55 mt-1">Indigenous Cultural Community mapping record</p>}
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className={cn('font-bold bg-gradient-to-r from-[#0A2D55] to-[#0A2D55] bg-clip-text text-transparent', isModal ? 'text-lg' : 'text-xl sm:text-2xl')}>Add New Mapping</h1>
+                {!isModal && <p className="text-sm text-[#0A2D55]/55 mt-1">Indigenous Cultural Community mapping record</p>}
+              </div>
+              <div className="relative" ref={sampleMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setShowSampleMenu(!showSampleMenu)}
+                  className={cn('font-semibold text-[#0A2D55] bg-[#F2C94C]/20 hover:bg-[#F2C94C]/30 border-2 border-[#F2C94C]/40 rounded-lg transition-all duration-200 active:scale-95 shadow-sm hover:shadow-md flex items-center gap-2', isModal ? 'px-3 py-1.5 text-xs' : 'px-4 py-2 text-sm')}
+                >
+                  <span>📋</span>
+                  Load Sample
+                  <ChevronDown size={16} className={`transition ${showSampleMenu ? 'rotate-180' : ''}`} />
+                </button>
+                {showSampleMenu && (
+                  <div className="absolute right-0 mt-2 w-64 bg-white border-2 border-[#0A2D55]/10 rounded-lg shadow-2xl z-[99999] overflow-hidden">
+                    {sampleDataPresets.map((preset, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => loadSampleData(preset)}
+                        className="w-full text-left px-4 py-3 text-sm hover:bg-[#F2C94C]/10 transition-colors border-b border-[#0A2D55]/5 last:border-b-0"
+                      >
+                        <div className="font-semibold text-[#0A2D55]">{preset.name}</div>
+                        <div className="text-xs text-[#0A2D55]/60 mt-0.5">{preset.data.surveyNumber}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
           <form onSubmit={handleValidateAndSubmit} className={cn('flex-1 flex flex-col min-h-0', isModal ? 'p-3 sm:p-4' : 'p-5 sm:p-7')}>

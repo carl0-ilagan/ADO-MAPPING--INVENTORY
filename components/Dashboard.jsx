@@ -20,14 +20,27 @@ const isAdmin = (role) => role && role.toLowerCase() === 'admin';
 export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappings = [] }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const userCanAccess = isAllowedRole(user?.role);
   const userIsAdmin = isAdmin(user?.role);
 
+  // Filter mappings based on search query
+  const filteredMappings = mappings.filter((mapping) => {
+    const query = searchQuery.toLowerCase();
+    return (
+      mapping.surveyNumber?.toLowerCase().includes(query) ||
+      mapping.province?.toLowerCase().includes(query) ||
+      mapping.municipality?.toLowerCase().includes(query) ||
+      mapping.icc?.join(', ').toLowerCase().includes(query) ||
+      mapping.remarks?.toLowerCase().includes(query)
+    );
+  });
+
   // Calculate statistics
   const stats = {
     totalMappings: mappings.length,
-    totalArea: mappings.reduce((sum, m) => sum + (m.totalArea || 0), 0).toFixed(2),
+    totalArea: mappings.reduce((sum, m) => sum + (m.totalArea || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
     regions: new Set(mappings.map((m) => m.region)).size,
   };
 
@@ -178,10 +191,10 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
       {/* Content */}
       <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8">
         {activeTab === 'overview' && (
-          <div className="space-y-4 sm:space-y-6">
+          <div className="space-y-4 sm:space-y-6 animate-section-1">
             {/* Stats Cards — login palette: navy #0A2D55, #0C3B6E, gold #F2C94C */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6">
-              <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-4 sm:p-6 border-l-4 border-[#0A2D55] hover:shadow-xl hover:border-[#0C3B6E] transition">
+              <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-4 sm:p-6 border-l-4 border-[#0A2D55] hover:shadow-xl hover:border-[#0C3B6E] transition animate-header">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <p className="text-[#0A2D55]/70 text-xs sm:text-sm font-medium truncate">Total Mappings</p>
@@ -193,7 +206,7 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
                 </div>
               </div>
 
-              <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-4 sm:p-6 border-l-4 border-[#F2C94C] hover:shadow-xl transition">
+              <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-4 sm:p-6 border-l-4 border-[#F2C94C] hover:shadow-xl transition animate-section-1">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <p className="text-[#0A2D55]/70 text-xs sm:text-sm font-medium truncate">Total Mapped Area</p>
@@ -206,7 +219,7 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
                 </div>
               </div>
 
-              <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-4 sm:p-6 border-l-4 border-[#0C3B6E] hover:shadow-xl transition">
+              <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-4 sm:p-6 border-l-4 border-[#0C3B6E] hover:shadow-xl transition animate-section-2">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <p className="text-[#0A2D55]/70 text-xs sm:text-sm font-medium truncate">Regions Covered</p>
@@ -220,7 +233,7 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
             </div>
 
             {/* Quick Actions — login palette; Add Mapping only for admin */}
-            <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-4 sm:p-6 lg:p-8">
+            <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-4 sm:p-6 lg:p-8 animate-section-3">
               <h2 className="text-lg sm:text-xl font-bold text-[#0A2D55] mb-4 sm:mb-6">Quick Actions</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
                 {userIsAdmin && (
@@ -258,50 +271,70 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
         )}
 
         {activeTab === 'mappings' && (
-          <div>
-            <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+          <div className="animate-section-1">
+            <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 animate-header">
               <h2 className="text-lg sm:text-2xl font-bold text-[#0A2D55]">All Mappings</h2>
-              {userIsAdmin && (
-                <button
-                  onClick={onAddMapping}
-                  className="flex items-center gap-2 bg-[#0A2D55] hover:bg-[#0C3B6E] active:scale-[0.98] text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-semibold transition text-sm sm:text-base w-full sm:w-auto justify-center sm:justify-start touch-manipulation shadow-lg shadow-black/15 ring-1 ring-white/10"
-                >
-                  <Plus size={18} />
-                  Add Mapping
-                </button>
-              )}
+              <div className="w-full sm:w-auto flex items-center gap-2 bg-white border-2 border-[#0A2D55]/10 rounded-xl px-4 py-2.5 hover:border-[#F2C94C]/40 focus-within:border-[#F2C94C] focus-within:ring-2 focus-within:ring-[#F2C94C]/40 transition-all shadow-sm hover:shadow-md">
+                <Search size={18} className="text-[#0A2D55]/40 flex-shrink-0" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search survey number, location, ICC..."
+                  className="flex-1 bg-transparent border-none outline-none text-sm text-[#0A2D55] placeholder-[#0A2D55]/50 min-w-0"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="text-[#0A2D55]/50 hover:text-[#0A2D55] transition flex-shrink-0"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
             </div>
 
-            {mappings.length === 0 ? (
-              <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg border border-white/20 p-8 sm:p-12 text-center">
+            {filteredMappings.length === 0 ? (
+              <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg border border-white/20 p-8 sm:p-12 text-center animate-section-2">
                 <Map className="w-12 h-12 sm:w-16 sm:h-16 text-[#0A2D55]/30 mx-auto mb-4" />
-                <p className="text-[#0A2D55]/70 text-sm sm:text-lg">No mappings yet. {userIsAdmin ? 'Create your first mapping to get started.' : 'Mappings will appear here.'}</p>
+                <p className="text-[#0A2D55]/70 text-sm sm:text-lg">
+                  {searchQuery ? 'No mappings found matching your search.' : 'No mappings yet. Create your first mapping to get started.'}
+                </p>
               </div>
             ) : (
-              <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg border border-white/20 overflow-hidden">
+              <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg border border-white/20 overflow-hidden animate-section-2">
                 {/* Desktop Table */}
                 <div className="hidden sm:block overflow-x-auto">
                   <table className="w-full">
                     <thead className="bg-[#0A2D55]/5 border-b border-[#0A2D55]/15">
                       <tr>
-                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-[#0A2D55] uppercase tracking-wide">Survey</th>
-                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-[#0A2D55] uppercase tracking-wide">Region</th>
+                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-[#0A2D55] uppercase tracking-wide">Survey Number</th>
+                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-[#0A2D55] uppercase tracking-wide">Location</th>
                         <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-[#0A2D55] uppercase tracking-wide">Area (ha)</th>
-                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-[#0A2D55] uppercase tracking-wide">ICC</th>
-                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-[#0A2D55] uppercase tracking-wide">Status</th>
+                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-[#0A2D55] uppercase tracking-wide">ICCs/IPs</th>
+                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-[#0A2D55] uppercase tracking-wide">Remarks</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {mappings.map((mapping, idx) => (
-                        <tr key={idx} className="border-b border-[#0A2D55]/10 hover:bg-[#F2C94C]/5 transition">
+                      {filteredMappings.map((mapping, idx) => (
+                        <tr 
+                          key={idx} 
+                          className="border-b border-[#0A2D55]/10 hover:bg-[#F2C94C]/5 transition fade-in-up"
+                          style={{ 
+                            animationDelay: `${idx * 100 + 400}ms`,
+                            opacity: 0
+                          }}
+                        >
                           <td className="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-medium text-[#0A2D55]">{mapping.surveyNumber}</td>
-                          <td className="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80">{mapping.region}</td>
-                          <td className="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80">{mapping.totalArea}</td>
+                          <td className="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 max-w-xs">
+                            <div className="line-clamp-2">{mapping.province}, {mapping.municipality}</div>
+                          </td>
+                          <td className="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 font-mono">
+                            {mapping.totalArea?.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                          </td>
                           <td className="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 max-w-xs truncate">{mapping.icc?.join(', ') || '-'}</td>
-                          <td className="px-4 sm:px-6 py-3 sm:py-4">
-                            <span className="inline-block bg-[#F2C94C]/25 text-[#0A2D55] px-2 sm:px-3 py-1 rounded-full text-xs font-semibold">
-                              Active
-                            </span>
+                          <td className="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 max-w-xs truncate">
+                            {mapping.remarks || '-'}
                           </td>
                         </tr>
                       ))}
@@ -311,31 +344,43 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
 
                 {/* Mobile Card View */}
                 <div className="sm:hidden space-y-3 p-3 sm:p-4">
-                  {mappings.map((mapping, idx) => (
-                    <div key={idx} className="bg-[#0A2D55]/5 border border-[#0A2D55]/15 rounded-xl p-4 space-y-3">
+                  {filteredMappings.map((mapping, idx) => (
+                    <div 
+                      key={idx} 
+                      className="bg-[#0A2D55]/5 border border-[#0A2D55]/15 rounded-xl p-4 space-y-3 fade-in-up"
+                      style={{ 
+                        animationDelay: `${idx * 100 + 400}ms`,
+                        opacity: 0
+                      }}
+                    >
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
-                          <p className="text-xs text-[#0A2D55]/60 font-medium">Survey</p>
+                          <p className="text-xs text-[#0A2D55]/60 font-medium">Survey Number</p>
                           <p className="text-sm font-bold text-[#0A2D55] truncate">{mapping.surveyNumber}</p>
                         </div>
-                        <span className="inline-block bg-[#F2C94C]/25 text-[#0A2D55] px-2 py-1 rounded-full text-xs font-semibold flex-shrink-0">
-                          Active
-                        </span>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <div>
-                          <p className="text-xs text-[#0A2D55]/60 font-medium">Region</p>
-                          <p className="text-xs text-[#0A2D55]/90 truncate">{mapping.region}</p>
+                          <p className="text-xs text-[#0A2D55]/60 font-medium">Province</p>
+                          <p className="text-xs text-[#0A2D55]/90 truncate">{mapping.province}</p>
                         </div>
                         <div>
                           <p className="text-xs text-[#0A2D55]/60 font-medium">Area (ha)</p>
-                          <p className="text-xs text-[#0A2D55]/90">{mapping.totalArea}</p>
+                          <p className="text-xs text-[#0A2D55]/90 font-mono">
+                            {mapping.totalArea?.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                          </p>
                         </div>
                       </div>
                       <div>
-                        <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">ICC</p>
+                        <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">ICCs/IPs</p>
                         <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{mapping.icc?.join(', ') || '-'}</p>
                       </div>
+                      {mapping.remarks && (
+                        <div>
+                          <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">Remarks</p>
+                          <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{mapping.remarks}</p>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
