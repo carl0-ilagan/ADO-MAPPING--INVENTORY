@@ -69,7 +69,7 @@ export function RightSplitModal({
           <div
             onClick={handleSecondaryClick}
             className={cn(
-              'flex w-1/4 min-w-0 flex-shrink-0',
+              'hidden md:flex w-1/4 min-w-0 flex-shrink-0',
               'cursor-default',
               dismissOnSecondaryClick && 'cursor-pointer'
             )}
@@ -102,7 +102,7 @@ export function RightSplitModal({
           </div>
 
           {/* Primary Panel (Right – 75%) – main content, scrollable */}
-          <div className="flex w-3/4 flex-col min-w-0 bg-white rounded-l-2xl overflow-hidden">
+          <div className="flex w-full md:w-3/4 flex-col min-w-0 bg-white rounded-l-2xl md:rounded-l-2xl overflow-hidden">
             <div className="relative flex flex-1 flex-col overflow-hidden">
               <DialogPrimitive.Close
                 className={cn(

@@ -11,6 +11,7 @@ import {
   Layers,
   BarChart3,
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 // Allowed roles: admin and user (encoder, reviewer)
 const ALLOWED_ROLES = ['admin', 'encoder', 'reviewer'];
@@ -21,6 +22,8 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
   const [activeTab, setActiveTab] = useState('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   const userCanAccess = isAllowedRole(user?.role);
   const userIsAdmin = isAdmin(user?.role);
@@ -36,6 +39,20 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
       mapping.remarks?.toLowerCase().includes(query)
     );
   });
+
+  // Pagination calculations
+  const totalPages = Math.ceil(filteredMappings.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedMappings = filteredMappings.slice(startIndex, endIndex);
+  const canGoPrevious = currentPage > 1;
+  const canGoNext = currentPage < totalPages;
+
+  // Reset to page 1 when search query changes
+  const handleSearch = (value) => {
+    setSearchQuery(value);
+    setCurrentPage(1);
+  };
 
   // Calculate statistics
   const stats = {
@@ -279,13 +296,13 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
                 <input
                   type="text"
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => handleSearch(e.target.value)}
                   placeholder="Search survey number, location, ICC..."
                   className="flex-1 bg-transparent border-none outline-none text-sm text-[#0A2D55] placeholder-[#0A2D55]/50 min-w-0"
                 />
                 {searchQuery && (
                   <button
-                    onClick={() => setSearchQuery('')}
+                    onClick={() => handleSearch('')}
                     className="text-[#0A2D55]/50 hover:text-[#0A2D55] transition flex-shrink-0"
                   >
                     ✕
@@ -316,7 +333,7 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredMappings.map((mapping, idx) => (
+                      {paginatedMappings.map((mapping, idx) => (
                         <tr 
                           key={idx} 
                           className="border-b border-[#0A2D55]/10 hover:bg-[#F2C94C]/5 transition fade-in-up"
@@ -344,7 +361,7 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
 
                 {/* Mobile Card View */}
                 <div className="sm:hidden space-y-3 p-3 sm:p-4">
-                  {filteredMappings.map((mapping, idx) => (
+                  {paginatedMappings.map((mapping, idx) => (
                     <div 
                       key={idx} 
                       className="bg-[#0A2D55]/5 border border-[#0A2D55]/15 rounded-xl p-4 space-y-3 fade-in-up"
@@ -383,6 +400,42 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
                       )}
                     </div>
                   ))}
+                </div>
+
+                {/* Pagination Controls */}
+                <div className="flex items-center justify-between px-4 sm:px-6 py-4 sm:py-5 border-t border-[#0A2D55]/10 bg-[#0A2D55]/2">
+                  <div className="text-xs sm:text-sm text-[#0A2D55]/70 font-medium">
+                    Showing <span className="font-bold text-[#0A2D55]">{startIndex + 1}</span> to <span className="font-bold text-[#0A2D55]">{Math.min(endIndex, filteredMappings.length)}</span> of <span className="font-bold text-[#0A2D55]">{filteredMappings.length}</span> records
+                  </div>
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    <button
+                      onClick={() => setCurrentPage(currentPage - 1)}
+                      disabled={!canGoPrevious}
+                      className={cn(
+                        'flex items-center gap-1 px-3 sm:px-4 py-2 rounded-lg font-semibold text-sm transition',
+                        canGoPrevious
+                          ? 'bg-[#0A2D55] text-white hover:bg-[#0C3B6E] active:scale-95 shadow-md'
+                          : 'bg-[#0A2D55]/20 text-[#0A2D55]/50 cursor-not-allowed'
+                      )}
+                    >
+                      ← Previous
+                    </button>
+                    <div className="text-xs sm:text-sm text-[#0A2D55] font-semibold px-2 py-1">
+                      Page <span className="text-[#F2C94C]">{currentPage}</span> of <span className="text-[#F2C94C]">{totalPages || 1}</span>
+                    </div>
+                    <button
+                      onClick={() => setCurrentPage(currentPage + 1)}
+                      disabled={!canGoNext}
+                      className={cn(
+                        'flex items-center gap-1 px-3 sm:px-4 py-2 rounded-lg font-semibold text-sm transition',
+                        canGoNext
+                          ? 'bg-[#0A2D55] text-white hover:bg-[#0C3B6E] active:scale-95 shadow-md'
+                          : 'bg-[#0A2D55]/20 text-[#0A2D55]/50 cursor-not-allowed'
+                      )}
+                    >
+                      Next →
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
