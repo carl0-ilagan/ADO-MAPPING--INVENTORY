@@ -7,6 +7,8 @@ import { MappingForm } from '@/components/MappingFormClean';
 import { RightSplitModal } from '@/components/RightSplitModal';
 import { onAuthStateChangeListener, signOutUser } from '@/lib/firebaseAuth.js';
 import { getUserMappings, addMapping, deleteMapping } from '@/lib/firebaseDB.js';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase.js';
 
 // Sample data based on the spreadsheet
 const SAMPLE_MAPPINGS = [
@@ -101,9 +103,15 @@ export function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateChangeListener(async (user) => {
       if (user) {
+        // Get user data from Firestore
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        const userData = userDoc.exists() ? userDoc.data() : {};
+        
         setCurrentUser({
           uid: user.uid,
           email: user.email,
+          role: userData.role || 'user',
+          communityName: userData.communityName || ''
         });
         // Load user's mappings from Firestore and merge with sample data
         setIsLoadingMappings(true);
@@ -152,18 +160,20 @@ export function App() {
     try {
       const newMapping = {
         userId: currentUser.uid,
-        communityName: formData.communityName || '',
-        region: formData.selectedRegion?.name || '',
-        province: formData.selectedProvince?.name || '',
-        municipality: formData.selectedMunicipality?.name || '',
-        barangay: formData.selectedBarangay?.name || '',
-        populationEstimate: formData.populationEstimate || 0,
-        resources: formData.selectedResources || [],
-        contact: formData.contactPerson || '',
-        email: formData.email || '',
+        surveyNumber: formData.surveyNumber || '',
+        region: formData.region || '',
+        province: formData.province || '',
+        municipality: (formData.municipalities || []).join(', '),
+        barangays: formData.barangays || [],
+        icc: formData.icc || [],
+        remarks: formData.remarks || '',
+        totalArea: formData.totalArea || 0,
       };
 
-      const mappingId = await addMapping(newMapping);
+      const mappingId = await addMapping({
+        ...newMapping,
+        location: '',
+      });
       
       // Update local state
       const updatedMappings = [...mappings, { id: mappingId, ...newMapping }];

@@ -2,6 +2,9 @@
 
 import React, { useEffect, useState } from 'react';
 import { Bell, Eye, EyeOff, MapPin } from 'lucide-react';
+import { signInUser } from '@/lib/firebaseAuth.js';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase.js';
 
 export function LoginPage({ onLogin }) {
   const [username, setUsername] = useState('');
@@ -23,26 +26,54 @@ export function LoginPage({ onLogin }) {
     setIsLoading(true);
 
     try {
-      // Check for test credentials
-      const normalizedUsername = username.trim().toLowerCase();
-      if (normalizedUsername === 'ncip' && password === 'admin123') {
-        setAlertTick((t) => t + 1);
-        setAlert({ type: 'success', message: 'Login successful. Redirecting…' });
-        await new Promise((r) => setTimeout(r, 450));
-        onLogin({
-          uid: 'ncip_admin',
-          email: 'ncip@ado.gov.ph',
-          role: 'admin',
-          communityName: 'NCIP Admin'
-        });
-        return;
+      const usernameInput = username.trim();
+      
+      // Convert username to email if needed (support both formats)
+      let email = usernameInput;
+      if (!usernameInput.includes('@')) {
+        // If user enters "ncip", convert to email
+        email = `${usernameInput}@ado.gov.ph`;
       }
       
+      console.log('🔐 Attempting login with email:', email);
+      
+      // Try Firebase authentication
+      const user = await signInUser(email, password);
+      console.log('✓ Login successful:', user.uid);
+      
+      // Get user data from Firestore
+      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      const userData = userDoc.exists() ? userDoc.data() : {};
+      
       setAlertTick((t) => t + 1);
-      setAlert({ type: 'error', message: 'Invalid username or password.' });
+      setAlert({ type: 'success', message: 'Login successful. Redirecting…' });
+      await new Promise((r) => setTimeout(r, 450));
+      
+      onLogin({
+        uid: user.uid,
+        email: user.email,
+        role: userData.role || 'user',
+        communityName: userData.communityName || ''
+      });
+      
     } catch (error) {
+      console.error('Login error:', error);
       setAlertTick((t) => t + 1);
-      const errorMessage = error.message || 'Authentication failed';
+      
+      let errorMessage = 'Invalid username or password.';
+      
+      if (error?.code === 'auth/invalid-credential' || error?.code === 'auth/wrong-password') {
+        errorMessage = 'Invalid username or password.';
+      } else if (error?.code === 'auth/user-not-found') {
+        errorMessage = 'User not found. Please check your username.';
+      } else if (error?.code === 'auth/too-many-requests') {
+        errorMessage = 'Too many failed attempts. Please try again later.';
+      } else if (error?.code === 'auth/network-request-failed') {
+        errorMessage = 'Network error. Please check your internet connection.';
+      } else if (error?.message) {
+        errorMessage = error.message;
+      }
+      
       setAlert({ type: 'error', message: errorMessage });
     } finally {
       setIsLoading(false);
@@ -130,14 +161,14 @@ export function LoginPage({ onLogin }) {
             {/* Username Field */}
             <div>
               <label htmlFor="username" className="block text-xs sm:text-sm font-semibold text-white/90 mb-2">
-                Username
+                Username or Email
               </label>
               <input
                 id="username"
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="ncip"
+                placeholder="ncip or ncip@ado.gov.ph"
                 className="w-full px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm border border-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/35 focus:border-[#F2C94C]/35 transition bg-white/10 text-white placeholder:text-white/60 backdrop-blur-md shadow-inner shadow-black/10"
                 autoComplete="username"
                 disabled={isLoading}

@@ -13,11 +13,6 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-// Allowed roles: admin and user (encoder, reviewer)
-const ALLOWED_ROLES = ['admin', 'encoder', 'reviewer'];
-const isAllowedRole = (role) => role && ALLOWED_ROLES.includes(role.toLowerCase());
-const isAdmin = (role) => role && role.toLowerCase() === 'admin';
-
 export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappings = [] }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -28,9 +23,6 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isClosingModal, setIsClosingModal] = useState(false);
   const itemsPerPage = 15;
-
-  const userCanAccess = isAllowedRole(user?.role);
-  const userIsAdmin = isAdmin(user?.role);
 
   // Filter mappings based on search query
   const filteredMappings = mappings.filter((mapping) => {
@@ -106,113 +98,6 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
     regions: new Set(mappings.map((m) => m.region)).size,
   };
 
-  if (!userCanAccess) {
-    return (
-      <>
-        <div className="min-h-screen flex items-center justify-center bg-[#0A2D55]" style={{
-          backgroundImage: 'linear-gradient(135deg, #0A2D55 0%, #0C3B6E 40%, #0A2D55 100%)',
-        }}>
-          <div className="text-center text-white px-6 max-w-md">
-            <p className="text-lg font-semibold">Access restricted</p>
-            <p className="text-white/80 mt-2 text-sm">This dashboard is for admin and user accounts only.</p>
-            <button
-              onClick={() => setShowLogoutModal(true)}
-              className="mt-6 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white text-sm font-medium ring-1 ring-white/20"
-            >
-              Back to Login
-            </button>
-          </div>
-        </div>
-
-        {/* Logout Confirmation Modal */}
-        {showLogoutModal && (
-          <>
-            {/* Enhanced backdrop with blur */}
-            <div 
-              className={cn(
-                "fixed inset-0 z-[100] transition-all duration-200",
-                isClosingModal ? "animate-out fade-out" : "animate-in fade-in"
-              )}
-              style={{
-                backgroundImage: `
-                  radial-gradient(circle at 20% 20%, rgba(255, 215, 0, 0.08), transparent 30%),
-                  radial-gradient(circle at 80% 80%, rgba(255, 215, 0, 0.05), transparent 28%),
-                  linear-gradient(135deg, rgba(10, 45, 85, 0.7) 0%, rgba(12, 59, 110, 0.8) 100%)
-                `,
-                backdropFilter: 'blur(12px)',
-              }}
-              onClick={handleCloseModal} 
-            />
-            
-            {/* Modal Card */}
-            <div className={cn(
-              "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[101] w-[90%] max-w-md transition-all duration-200",
-              isClosingModal ? "animate-out zoom-out fade-out" : "animate-in zoom-in fade-in"
-            )}>
-              <div className="relative rounded-2xl border border-white/20 bg-white/10 backdrop-blur-2xl shadow-2xl shadow-black/35 overflow-hidden">
-                {/* Loading overlay */}
-                {isLoggingOut && (
-                  <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#071A2C]/20 backdrop-blur-md">
-                    <div className="flex flex-col items-center gap-3">
-                      <div className="rounded-full border border-white/20 bg-white/10 backdrop-blur-xl shadow-xl shadow-black/30 p-4">
-                        <div className="h-12 w-12 rounded-full border-2 border-white/25 border-t-[#F2C94C] animate-spin" />
-                      </div>
-                      <p className="text-sm font-medium text-white/90">Logging out...</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Header with gradient */}
-                <div 
-                  className="px-6 py-5"
-                  style={{
-                    backgroundImage: 'linear-gradient(135deg, #0A2D55 0%, #0C3B6E 40%, #0A2D55 100%)',
-                  }}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 bg-white/15 rounded-2xl flex items-center justify-center ring-2 ring-white/25 shadow-xl">
-                      <LogOut size={22} className="text-white" />
-                    </div>
-                    <h3 className="text-xl font-bold text-white tracking-tight">Confirm Logout</h3>
-                  </div>
-                </div>
-
-                {/* Content */}
-                <div className="px-6 py-8">
-                  <p className="text-white/90 text-sm leading-relaxed">
-                    Are you sure you want to log out? Any unsaved changes will be lost.
-                  </p>
-                </div>
-
-                {/* Actions */}
-                <div className="px-6 py-5 bg-white/5 backdrop-blur-sm flex items-center justify-end gap-3 border-t border-white/10">
-                  <button
-                    onClick={handleCloseModal}
-                    disabled={isLoggingOut}
-                    className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-white/5 hover:bg-white/10 text-white/80 hover:text-white transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ring-1 ring-white/10"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={async () => {
-                      setIsLoggingOut(true);
-                      await new Promise((r) => setTimeout(r, 800));
-                      onLogout();
-                    }}
-                    disabled={isLoggingOut}
-                    className="px-6 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-r from-[#0A2D55] to-[#0C3B6E] text-white hover:shadow-xl hover:shadow-black/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ring-1 ring-white/20"
-                  >
-                    Logout
-                  </button>
-                </div>
-              </div>
-            </div>
-          </>
-        )}
-      </>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-[#071A2C]/30">
       {/* Header — enlarged logo, enhanced */}
@@ -229,7 +114,7 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
             <div className="min-w-0">
               <h1 className="text-base sm:text-2xl md:text-[1.6rem] font-bold truncate tracking-tight">ADO Mapping Inventory System</h1>
               <p className="text-xs sm:text-sm text-white/80 truncate mt-0.5">
-                {user.role.charAt(0).toUpperCase() + user.role.slice(1)} • {user.username}
+                {user?.role ? (user.role.charAt(0).toUpperCase() + user.role.slice(1)) : 'User'} • {user?.email || user?.username || 'Unknown'}
               </p>
             </div>
           </div>

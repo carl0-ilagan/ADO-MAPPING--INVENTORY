@@ -56,12 +56,13 @@ async function fetchJson(url) {
   return res.json();
 }
 
-function SearchableSelect({ options = [], selected = null, onChange = () => {}, placeholder = "Select", multi = false, disabled = false, summaryLabels = { singular: "item", plural: "items" } }) {
+function SearchableSelect({ options = [], selected = null, onChange = () => {}, placeholder = "Select", multi = false, disabled = false, summaryLabels = { singular: "item", plural: "items" }, allowCustom = false }) {
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
   const [search, setSearch] = useState("");
   const triggerRef = useRef(null);
   const menuRef = useRef(null);
+  const inputRef = useRef(null);
 
   const closeMenu = () => {
     if (!open) return;
@@ -69,7 +70,7 @@ function SearchableSelect({ options = [], selected = null, onChange = () => {}, 
     setTimeout(() => {
       setOpen(false);
       setClosing(false);
-      setSearch("");
+      if (!allowCustom) setSearch("");
     }, 160);
   };
 
@@ -92,12 +93,46 @@ function SearchableSelect({ options = [], selected = null, onChange = () => {}, 
   const filtered = options.filter((o) => String(o.name).toLowerCase().includes(search.toLowerCase()));
 
   const handleToggle = (code) => {
-    if (!multi) return onChange(code);
+    if (!multi) {
+      onChange(code);
+      if (allowCustom) {
+        const found = options.find((o) => String(o.code) === String(code));
+        setSearch(found ? found.name : code);
+      }
+      closeMenu();
+      return;
+    }
     const next = new Set(Array.from(selected || []));
     const key = String(code);
     if (next.has(key)) next.delete(key);
     else next.add(key);
     onChange(next);
+  };
+
+  // Allow custom value entry for single select
+  const handleCustomValue = () => {
+    if (!allowCustom || !search.trim()) return;
+    const trimmed = search.trim();
+    
+    if (multi) {
+      // For multi-select, add the custom value as a new item
+      const next = new Set(Array.from(selected || []));
+      next.add(trimmed);
+      onChange(next);
+      setSearch("");
+      return;
+    }
+    
+    // For single select
+    // Check if it already exists in options
+    const existing = options.find((o) => o.name.toLowerCase() === trimmed.toLowerCase());
+    if (existing) {
+      onChange(existing.code);
+    } else {
+      // Use the custom text as both code and name
+      onChange(trimmed);
+    }
+    closeMenu();
   };
 
   const label = (() => {
@@ -107,13 +142,13 @@ function SearchableSelect({ options = [], selected = null, onChange = () => {}, 
       if (count === 1) {
         const first = Array.from(selected)[0];
         const found = options.find((o) => String(o.code) === String(first));
-        return found ? found.name : placeholder;
+        return found ? found.name : first;
       }
       return `${count} ${summaryLabels.plural} selected`;
     }
     if (!selected) return placeholder;
     const found = options.find((o) => String(o.code) === String(selected));
-    return found ? found.name : placeholder;
+    return found ? found.name : selected;
   })();
 
   return (
@@ -145,10 +180,31 @@ function SearchableSelect({ options = [], selected = null, onChange = () => {}, 
           )}
         >
           <div className="p-3 sticky top-0 bg-white border-b border-[#0A2D55]/10">
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search..." className="w-full px-3 py-2 border-2 border-[#0A2D55]/10 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40" />
+            <input 
+              ref={inputRef}
+              value={search} 
+              onChange={(e) => setSearch(e.target.value)} 
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && allowCustom && search.trim()) {
+                  e.preventDefault();
+                  handleCustomValue();
+                }
+              }}
+              placeholder={allowCustom ? "Search or type custom..." : "Search..."} 
+              className="w-full px-3 py-2 border-2 border-[#0A2D55]/10 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40" 
+            />
           </div>
           <div className="p-2 max-h-72 overflow-y-auto">
-            {filtered.length === 0 && <p className="text-center text-sm text-[#0A2D55]/40 py-4">No results found</p>}
+            {filtered.length === 0 && !allowCustom && <p className="text-center text-sm text-[#0A2D55]/40 py-4">No results found</p>}
+            {filtered.length === 0 && allowCustom && search.trim() && (
+              <button
+                type="button"
+                onClick={handleCustomValue}
+                className="w-full px-3 py-3 text-left hover:bg-[#F2C94C]/10 rounded-lg text-sm font-medium text-[#0A2D55] border-2 border-dashed border-[#F2C94C]/30"
+              >
+                ✨ Add {multi ? '' : 'custom: '}"<span className="font-bold">{search.trim()}</span>"
+              </button>
+            )}
             {filtered.map((opt) => (
               <label key={String(opt.code)} className="flex items-center gap-3 w-full px-3 py-2 hover:bg-[#0A2D55]/5 rounded-lg cursor-pointer">
                 {multi ? (
@@ -166,7 +222,7 @@ function SearchableSelect({ options = [], selected = null, onChange = () => {}, 
   );
 }
 
-export default function MappingForm({ isModal = false, onBack = () => {} }) {
+export default function MappingForm({ isModal = false, onBack = () => {}, onSubmit = () => {} }) {
   const [regions, setRegions] = useState([]);
   const [provincesAll, setProvincesAll] = useState([]);
   const [municipalitiesAll, setMunicipalitiesAll] = useState([]);
@@ -184,6 +240,7 @@ export default function MappingForm({ isModal = false, onBack = () => {} }) {
   const [selectedIccIpCodes, setSelectedIccIpCodes] = useState(new Set());
 
   const [surveyNumber, setSurveyNumber] = useState("");
+  const [totalArea, setTotalArea] = useState("");
   const [remarks, setRemarks] = useState("");
   const [errors, setErrors] = useState({});
 
@@ -193,7 +250,33 @@ export default function MappingForm({ isModal = false, onBack = () => {} }) {
       try {
         const regs = await fetchJson(PSGC.REGIONS);
         if (!mounted) return;
-        const rlist = regs.map((r) => ({ code: r.regionCode || r.code, name: r.name }));
+        
+        // Filter to only CAR and Region I to XIII
+        // PSGC returns regions like "REGION I (ILOCOS REGION)", "REGION II (CAGAYAN VALLEY)", etc.
+        const rlist = regs
+          .map((r) => ({ code: r.regionCode || r.code, name: r.name }))
+          .filter((r) => {
+            const regionName = r.name.toUpperCase();
+            
+            // Match CAR/Cordillera
+            if (regionName.includes('CAR') || regionName.includes('CORDILLERA')) {
+              return true;
+            }
+            
+            // Match Region I through XIII (including IV-A, IV-B)
+            const romanNumerals = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII'];
+            const matchesRoman = romanNumerals.some(numeral => {
+              // Match "REGION I", "REGION II", etc. at the start
+              const pattern1 = new RegExp(`^REGION\\s+${numeral}\\b`, 'i');
+              const pattern2 = new RegExp(`^REGION\\s+${numeral}-[AB]\\b`, 'i');
+              return pattern1.test(regionName) || pattern2.test(regionName);
+            });
+            
+            return matchesRoman;
+          });
+        
+        console.log('Filtered regions:', rlist.map(r => r.name));
+        
         rlist.forEach((r) => regionMap.set(String(r.code), r.name));
         setRegions(rlist);
 
@@ -243,6 +326,23 @@ export default function MappingForm({ isModal = false, onBack = () => {} }) {
   const municipalities = useMemo(() => renderMunicipalities(selectedProvinceCode), [selectedProvinceCode, municipalitiesAll]);
   const barangays = useMemo(() => renderBarangays(selectedMunicipalityCodes), [selectedMunicipalityCodes, barangaysAll]);
 
+  // Handle total area input with commas and decimals
+  const handleTotalAreaChange = (value) => {
+    // Remove all non-numeric characters except decimal point and comma
+    const cleaned = value.replace(/[^\d.,]/g, '');
+    // Allow only one decimal point
+    const parts = cleaned.split('.');
+    if (parts.length > 2) return; // More than one decimal point
+    setTotalArea(cleaned);
+  };
+
+  // Parse total area to number (remove commas)
+  const parseTotalArea = (value) => {
+    if (!value) return 0;
+    const cleaned = value.replace(/,/g, '');
+    return parseFloat(cleaned) || 0;
+  };
+
   useEffect(() => {
     setSelectedProvinceCode(null);
     setSelectedMunicipalityCodes(new Set());
@@ -278,7 +378,39 @@ export default function MappingForm({ isModal = false, onBack = () => {} }) {
   const handleSave = (ev) => {
     ev.preventDefault();
     if (!validate()) return;
+
+    const regionName = regionMap.get(String(selectedRegionCode)) || selectedRegionCode || "";
+    
+    // Handle province - could be from list or custom
+    const provinceName = provinceMap.get(String(selectedProvinceCode)) || selectedProvinceCode || "";
+    
+    // Handle municipalities - could be from list or custom
+    const municipalityNames = Array.from(selectedMunicipalityCodes)
+      .map((c) => municipalityMap.get(String(c)) || c)
+      .filter(Boolean)
+      .sort();
+    
+    // Handle barangays - could be from list or custom
+    const barangayNames = Array.from(selectedBarangayCodes)
+      .map((c) => barangayMap.get(String(c)) || c)
+      .filter(Boolean)
+      .sort();
+      
+    const iccIpNames = Array.from(selectedIccIpCodes);
+
+    onSubmit({
+      surveyNumber: surveyNumber.trim(),
+      region: regionName,
+      province: provinceName,
+      municipalities: municipalityNames,
+      barangays: barangayNames,
+      icc: iccIpNames,
+      remarks: remarks.trim(),
+      totalArea: parseTotalArea(totalArea),
+    });
+
     setSurveyNumber("");
+    setTotalArea("");
     setRemarks("");
     setSelectedRegionCode(null);
     setSelectedProvinceCode(null);
@@ -317,25 +449,41 @@ export default function MappingForm({ isModal = false, onBack = () => {} }) {
                   {errors.surveyNumber && <p className="text-red-500 text-xs mt-1">{errors.surveyNumber}</p>}
                 </div>
                 <div>
-                  <label className="block font-semibold text-[#0A2D55] mb-2">ICC/IP Community</label>
-                  <SearchableSelect
-                    options={ICC_IP_OPTIONS.map((name) => ({ code: name, name }))}
-                    selected={selectedIccIpCodes}
-                    onChange={(s) => setSelectedIccIpCodes(s)}
-                    placeholder="Select ICC/IP"
-                    multi={true}
-                    summaryLabels={{ singular: "group", plural: "groups" }}
+                  <label className="block font-semibold text-[#0A2D55] mb-2">Total Area (hectares)</label>
+                  <input 
+                    value={totalArea} 
+                    onChange={(e) => handleTotalAreaChange(e.target.value)} 
+                    className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" 
+                    placeholder="e.g. 1,234.56" 
+                    type="text"
                   />
-                  {selectedIccIpCodes.size > 0 && (
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {Array.from(selectedIccIpCodes).map((code) => (
-                        <span key={code} className="inline-flex items-center gap-1.5 bg-[#0C3B6E] text-white px-3 py-1.5 rounded-full text-xs">
-                          {code}
-                        </span>
-                      ))}
-                    </div>
+                  {totalArea && (
+                    <p className="text-xs text-[#0A2D55]/60 mt-1">
+                      {parseTotalArea(totalArea).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ha
+                    </p>
                   )}
                 </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-[#0A2D55] mb-2">ICC/IP Community</label>
+                <SearchableSelect
+                  options={ICC_IP_OPTIONS.map((name) => ({ code: name, name }))}
+                  selected={selectedIccIpCodes}
+                  onChange={(s) => setSelectedIccIpCodes(s)}
+                  placeholder="Select ICC/IP"
+                  multi={true}
+                  summaryLabels={{ singular: "group", plural: "groups" }}
+                />
+                {selectedIccIpCodes.size > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {Array.from(selectedIccIpCodes).map((code) => (
+                      <span key={code} className="inline-flex items-center gap-1.5 bg-[#0C3B6E] text-white px-3 py-1.5 rounded-full text-xs">
+                        {code}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -346,7 +494,14 @@ export default function MappingForm({ isModal = false, onBack = () => {} }) {
                 </div>
                 <div>
                   <label className="block font-semibold text-[#0A2D55] mb-2">Province <span className="text-red-500">*</span></label>
-                  <SearchableSelect options={provinces.map((p) => ({ code: p.code, name: p.name }))} selected={selectedProvinceCode} onChange={(c) => setSelectedProvinceCode(c)} placeholder="Select province" disabled={!selectedRegionCode} />
+                  <SearchableSelect 
+                    options={provinces.map((p) => ({ code: p.code, name: p.name }))} 
+                    selected={selectedProvinceCode} 
+                    onChange={(c) => setSelectedProvinceCode(c)} 
+                    placeholder="Select or type province" 
+                    disabled={!selectedRegionCode}
+                    allowCustom={true}
+                  />
                   {errors.province && <p className="text-red-500 text-xs mt-1">{errors.province}</p>}
                 </div>
               </div>
@@ -354,7 +509,16 @@ export default function MappingForm({ isModal = false, onBack = () => {} }) {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block font-semibold text-[#0A2D55] mb-2">Municipalities <span className="text-red-500">*</span></label>
-                  <SearchableSelect options={municipalities.map((m) => ({ code: m.code, name: m.name }))} selected={selectedMunicipalityCodes} onChange={(s) => setSelectedMunicipalityCodes(s)} placeholder="Select municipalities" multi={true} disabled={!selectedProvinceCode} summaryLabels={{ singular: "municipality", plural: "municipalities" }} />
+                  <SearchableSelect 
+                    options={municipalities.map((m) => ({ code: m.code, name: m.name }))} 
+                    selected={selectedMunicipalityCodes} 
+                    onChange={(s) => setSelectedMunicipalityCodes(s)} 
+                    placeholder="Select or type municipalities" 
+                    multi={true} 
+                    disabled={!selectedProvinceCode} 
+                    summaryLabels={{ singular: "municipality", plural: "municipalities" }}
+                    allowCustom={true}
+                  />
                   {errors.municipalities && <p className="text-red-500 text-xs mt-1">{errors.municipalities}</p>}
                   {selectedMunicipalityCodes.size > 0 && (
                     <div className="flex flex-wrap gap-2 mt-2">
@@ -366,7 +530,16 @@ export default function MappingForm({ isModal = false, onBack = () => {} }) {
                 </div>
                 <div>
                   <label className="block font-semibold text-[#0A2D55] mb-2">Barangays <span className="text-red-500">*</span></label>
-                  <SearchableSelect options={barangays.map((b) => ({ code: b.code, name: b.name }))} selected={selectedBarangayCodes} onChange={(s) => setSelectedBarangayCodes(s)} placeholder="Select barangays" multi={true} disabled={selectedMunicipalityCodes.size === 0} summaryLabels={{ singular: "barangay", plural: "barangays" }} />
+                  <SearchableSelect 
+                    options={barangays.map((b) => ({ code: b.code, name: b.name }))} 
+                    selected={selectedBarangayCodes} 
+                    onChange={(s) => setSelectedBarangayCodes(s)} 
+                    placeholder="Select or type barangays" 
+                    multi={true} 
+                    disabled={selectedMunicipalityCodes.size === 0} 
+                    summaryLabels={{ singular: "barangay", plural: "barangays" }}
+                    allowCustom={true}
+                  />
                   {errors.barangays && <p className="text-red-500 text-xs mt-1">{errors.barangays}</p>}
                   {selectedBarangayCodes.size > 0 && (
                     <div className="flex flex-wrap gap-2 mt-2">
