@@ -23,7 +23,8 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+  const [fabOpen, setFabOpen] = useState(false);
+  const itemsPerPage = 15;
 
   const userCanAccess = isAllowedRole(user?.role);
   const userIsAdmin = isAdmin(user?.role);
@@ -52,6 +53,37 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
   const handleSearch = (value) => {
     setSearchQuery(value);
     setCurrentPage(1);
+  };
+
+  // Export to Excel function
+  const handleExportExcel = () => {
+    const headers = ['Survey Number', 'Province', 'Municipality', 'Barangays', 'Total Area', 'ICC', 'Remarks', 'Region'];
+    const rows = mappings.map(m => [
+      m.surveyNumber || '',
+      m.province || '',
+      m.municipality || '',
+      m.barangays?.join(', ') || '',
+      m.totalArea || '',
+      m.icc?.join('; ') || '',
+      m.remarks || '',
+      m.region || ''
+    ]);
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `mappings-${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setFabOpen(false);
   };
 
   // Calculate statistics
@@ -90,7 +122,7 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
               <img
                 src="/ncip-logo-removebg-preview.png"
                 alt="NCIP"
-                className="w-10 h-10 sm:w-12 sm:h-12 md:w-14 md:h-14 object-contain drop-shadow-lg"
+                className="w-12 h-12 sm:w-14 sm:h-14 md:w-16 md:h-16 object-contain drop-shadow-lg"
               />
             </div>
             <div className="min-w-0">
@@ -146,20 +178,6 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
               </div>
 
               <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-                <button
-                  onClick={onAddMapping}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 hover:bg-white/15 active:scale-95 text-white px-4 py-2.5 text-sm font-semibold ring-1 ring-white/15 backdrop-blur-md transition"
-                >
-                  <Plus size={18} />
-                  Add Mapping
-                </button>
-                <button
-                  onClick={onViewMappings}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#F2C94C] hover:bg-[#E6BB3A] active:scale-95 text-[#0A2D55] px-4 py-2.5 text-sm font-semibold shadow-lg shadow-black/20 transition"
-                >
-                  <Search size={18} />
-                  View Mappings
-                </button>
               </div>
             </div>
           </div>
@@ -249,41 +267,6 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
               </div>
             </div>
 
-            {/* Quick Actions — login palette; Add Mapping only for admin */}
-            <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-4 sm:p-6 lg:p-8 animate-section-3">
-              <h2 className="text-lg sm:text-xl font-bold text-[#0A2D55] mb-4 sm:mb-6">Quick Actions</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
-                {userIsAdmin && (
-                  <button
-                    onClick={onAddMapping}
-                    className="flex flex-col sm:flex-row items-center justify-center sm:justify-start gap-2 bg-[#0A2D55] hover:bg-[#0C3B6E] active:scale-[0.98] text-white px-4 sm:px-6 py-3.5 sm:py-4 rounded-xl font-semibold transition text-sm sm:text-base touch-manipulation shadow-lg shadow-black/15 ring-1 ring-white/10"
-                  >
-                    <Plus size={20} className="sm:w-5 sm:h-5 flex-shrink-0" />
-                    <span>Add Mapping</span>
-                  </button>
-                )}
-                <button
-                  onClick={onViewMappings}
-                  className="flex flex-col sm:flex-row items-center justify-center sm:justify-start gap-2 bg-[#F2C94C] hover:bg-[#E6BB3A] active:scale-[0.98] text-[#0A2D55] px-4 sm:px-6 py-3.5 sm:py-4 rounded-xl font-semibold transition text-sm sm:text-base touch-manipulation shadow-lg shadow-black/15"
-                >
-                  <Search size={20} className="sm:w-5 sm:h-5 flex-shrink-0" />
-                  <span>View Mappings</span>
-                </button>
-                <button
-                  className="flex flex-col sm:flex-row items-center justify-center sm:justify-start gap-2 bg-[#0C3B6E]/15 hover:bg-[#0C3B6E]/25 active:scale-[0.98] text-[#0A2D55] px-4 sm:px-6 py-3.5 sm:py-4 rounded-xl font-semibold transition text-sm sm:text-base touch-manipulation border border-[#0A2D55]/20"
-                >
-                  <Download size={20} className="sm:w-5 sm:h-5 flex-shrink-0" />
-                  <span>Export Excel</span>
-                </button>
-                <button
-                  className="flex flex-col sm:flex-row items-center justify-center sm:justify-start gap-2 bg-[#0A2D55] hover:bg-[#0C3B6E] active:scale-[0.98] text-white px-4 sm:px-6 py-3.5 sm:py-4 rounded-xl font-semibold transition text-sm sm:text-base touch-manipulation shadow-lg shadow-black/15 ring-1 ring-white/10"
-                >
-                  <Download size={20} className="sm:w-5 sm:h-5 flex-shrink-0" />
-                  <span>Export CSV</span>
-                </button>
-              </div>
-            </div>
-
           </div>
         )}
 
@@ -321,7 +304,7 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
             ) : (
               <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg border border-white/20 overflow-hidden animate-section-2">
                 {/* Desktop Table */}
-                <div className="hidden sm:block overflow-x-auto">
+                <div className="hidden sm:block overflow-x-auto hide-scrollbar">
                   <table className="w-full">
                     <thead className="bg-[#0A2D55]/5 border-b border-[#0A2D55]/15">
                       <tr>
@@ -360,7 +343,7 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
                 </div>
 
                 {/* Mobile Card View */}
-                <div className="sm:hidden space-y-3 p-3 sm:p-4">
+                <div className="sm:hidden space-y-3 p-3 sm:p-4 max-h-[60vh] overflow-y-auto hide-scrollbar">
                   {paginatedMappings.map((mapping, idx) => (
                     <div 
                       key={idx} 
@@ -442,6 +425,61 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
           </div>
         )}
       </main>
+
+      {/* Floating Action Button with Menu */}
+      <div className="fixed bottom-8 right-8 z-50">
+        {/* Add Mapping Button - Directly Left */}
+        <button
+          onClick={() => {
+            onAddMapping();
+            setFabOpen(false);
+          }}
+          className={cn(
+            "absolute w-14 h-14 bg-white hover:bg-gray-100 text-[#0A2D55] rounded-full shadow-lg hover:shadow-xl transition-all duration-300 ease-out active:scale-95 flex items-center justify-center",
+            fabOpen
+              ? "opacity-100 bottom-0 right-20"
+              : "opacity-0 bottom-0 right-0 pointer-events-none"
+          )}
+          title="Add Mapping"
+        >
+          <Plus size={24} strokeWidth={2.5} />
+        </button>
+
+        {/* Export Excel Button - Top Left (YELLOW) */}
+        <button
+          onClick={handleExportExcel}
+          className={cn(
+            "absolute w-14 h-14 bg-[#F2C94C] hover:bg-yellow-400 text-[#0A2D55] rounded-full shadow-lg hover:shadow-xl transition-all duration-300 ease-out active:scale-95 flex items-center justify-center",
+            fabOpen
+              ? "opacity-100 bottom-20 right-16"
+              : "opacity-0 bottom-0 right-0 pointer-events-none"
+          )}
+          title="Export to Excel"
+        >
+          <Download size={24} strokeWidth={2.5} />
+        </button>
+
+        {/* Main FAB Button */}
+        <button
+          onClick={() => setFabOpen(!fabOpen)}
+          className="relative w-16 h-16 bg-[#0A2D55] hover:bg-[#0C3B6E] text-white rounded-full shadow-lg hover:shadow-xl transition-all active:scale-95 flex items-center justify-center z-50"
+          title="Menu"
+        >
+          <Plus
+            size={28}
+            strokeWidth={3}
+            className={`transition-transform duration-300 ${fabOpen ? 'rotate-45' : ''}`}
+          />
+        </button>
+      </div>
+
+      {/* Overlay to close FAB menu */}
+      {fabOpen && (
+        <div
+          className="fixed inset-0 z-40"
+          onClick={() => setFabOpen(false)}
+        />
+      )}
     </div>
   );
 }

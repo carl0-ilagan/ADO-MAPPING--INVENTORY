@@ -71,17 +71,42 @@ function SearchableSelect({ options = [], selected = null, onChange = () => {}, 
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search..." className="w-full px-3 py-2 border-2 rounded-lg text-sm" />
           </div>
           <div className="p-2 max-h-72 overflow-y-auto">
-            {filtered.length === 0 && <p className="text-center text-sm text-[#0A2D55]/40 py-4">No results found</p>}
-            {filtered.map(opt => (
-              <label key={String(opt.code)} className="flex items-center gap-3 w-full px-3 py-2 hover:bg-[#0A2D55]/5 rounded-lg cursor-pointer">
-                {multi ? (
-                  <input type="checkbox" checked={selected ? selected.has(String(opt.code)) : false} onChange={() => handleToggle(opt.code)} />
-                ) : (
-                  <input type="radio" name="single-select" checked={String(selected) === String(opt.code)} onChange={() => handleToggle(opt.code)} />
-                )}
-                <span className="text-sm">{opt.name}</span>
-              </label>
-            ))}
+            {filtered.length > 0 ? (
+              filtered.map((option) => (
+                <button
+                  key={option.id}
+                  onClick={() => handleSelect(option)}
+                  type="button"
+                  className={`w-full text-left px-3 py-2.5 rounded-lg text-sm transition duration-150 ${
+                    (Array.isArray(selected) ? selected.find((s) => s.id === option.id) : selected?.id === option.id)
+                      ? 'bg-[#F2C94C]/30 text-[#0A2D55] font-semibold'
+                      : 'hover:bg-[#0A2D55]/5 text-[#0A2D55]'
+                  }`}
+                >
+                  {option.name}
+                </button>
+              ))
+            ) : (
+              <p className="text-center text-sm text-[#0A2D55]/40 py-4">No results found</p>
+            )}
+            <div className="border-t border-[#0A2D55]/10 mt-2 pt-2">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={customValue}
+                  onChange={(e) => setCustomValue(e.target.value)}
+                  placeholder="Add new..."
+                  className="flex-1 px-3 py-2 border-2 border-[#0A2D55]/10 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition shadow-sm"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddCustom}
+                  className="px-3 py-2 bg-[#F2C94C] text-[#0A2D55] rounded-lg text-sm font-semibold hover:bg-[#E6BB3A] transition active:scale-95 flex-shrink-0"
+                >
+                  <Plus size={16} />
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -257,12 +282,40 @@ export default function MappingForm({ isModal = false, onBack = () => {} }) {
             </div>
           </div>
 
-          <form onSubmit={handleSave} className="flex-1 p-5 sm:p-7">
-            <div className="space-y-6">
-              <div>
-                <label className="block font-semibold text-[#0A2D55] mb-2">Survey Number <span className="text-red-500">*</span></label>
-                <input value={surveyNumber} onChange={(e) => setSurveyNumber(e.target.value)} className="w-full px-4 py-3 border-2 rounded-lg" placeholder="e.g. ADO-2024-001" />
-                {errors.surveyNumber && <p className="text-red-500 text-xs mt-1">{errors.surveyNumber}</p>}
+          <form onSubmit={handleValidateAndSubmit} className={cn('flex-1 flex flex-col min-h-0', isModal ? 'p-3 sm:p-4' : 'p-5 sm:p-7')}>
+            {/* Single column unified form - with scrolling content */}
+            <div className={cn('flex-1 overflow-y-auto pr-2', isModal ? 'space-y-2' : 'space-y-6')}>
+              {/* Section 1: Mapping Info */}
+              <div className={cn(isModal ? 'space-y-2 animate-section-1' : 'space-y-4')}>
+                <div className={isModal ? 'flex items-center gap-3 mb-2' : 'flex items-center gap-4 mb-4'}>
+                  <div className="flex-1 h-0.5 bg-gradient-to-r from-[#F2C94C] via-[#F2C94C]/50 to-transparent"></div>
+                  <h2 className={cn('font-bold uppercase tracking-wider text-[#0A2D55] whitespace-nowrap', isModal ? 'text-xs' : 'text-sm')}>📍 Mapping Info</h2>
+                  <div className="flex-1 h-0.5 bg-gradient-to-l from-[#F2C94C] via-[#F2C94C]/50 to-transparent"></div>
+                </div>
+                <div className={isModal ? 'grid grid-cols-1 sm:grid-cols-2 gap-2' : 'grid grid-cols-1 sm:grid-cols-2 gap-4'}>
+                  <div>
+                    <label className={cn('block font-semibold text-[#0A2D55]', isModal ? 'text-xs mb-1' : 'text-sm mb-2')}>Survey Number <span className="text-red-500">*</span></label>
+                    <input
+                      type="text"
+                      value={formData.surveyNumber}
+                      onChange={(e) => setFormData({ ...formData, surveyNumber: e.target.value })}
+                      placeholder="e.g. ADO-2024-001"
+                      className={cn('w-full border-2 border-[#0A2D55]/10 rounded-lg bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/50 focus:border-[#F2C94C] transition-all duration-200 shadow-sm hover:shadow-md', isModal ? 'px-3 py-2 text-xs' : 'px-4 py-3 text-sm')}
+                    />
+                    {errors.surveyNumber && <p className="text-red-500 text-xs mt-1.5 font-medium">{errors.surveyNumber}</p>}
+                  </div>
+                  <div>
+                    <label className={cn('block font-semibold text-[#0A2D55]', isModal ? 'text-xs mb-1' : 'text-sm mb-2')}>Area (hectares) <span className="text-red-500">*</span></label>
+                    <input
+                      type="number"
+                      value={formData.totalArea}
+                      onChange={(e) => setFormData({ ...formData, totalArea: e.target.value })}
+                      placeholder="Enter area"
+                      className={cn('w-full border border-[#0A2D55]/15 rounded-xl bg-white hover:border-[#0A2D55]/25 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 focus:border-[#F2C94C] transition-all duration-200', isModal ? 'px-3 py-2 text-xs' : 'px-4 py-3 text-sm')}
+                    />
+                    {errors.totalArea && <p className="text-red-500 text-xs mt-1.5 font-medium">{errors.totalArea}</p>}
+                  </div>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
