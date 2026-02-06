@@ -10,10 +10,11 @@ import {
   MapPin,
   Layers,
   BarChart3,
+  User,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappings = [] }) {
+export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, onViewProfile, mappings = [] }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -414,6 +415,23 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
 
       {/* Floating Action Button with Menu */}
       <div className="fixed bottom-8 right-8 z-50">
+        {/* Profile Button - Top */}
+        <button
+          onClick={() => {
+            onViewProfile();
+            setFabOpen(false);
+          }}
+          className={cn(
+            "absolute w-14 h-14 bg-[#0A2D55] hover:bg-[#0C3B6E] text-white rounded-full shadow-lg hover:shadow-xl transition-all duration-300 ease-out active:scale-95 flex items-center justify-center",
+            fabOpen
+              ? "opacity-100 bottom-20 right-0"
+              : "opacity-0 bottom-0 right-0 pointer-events-none"
+          )}
+          title="Profile"
+        >
+          <User size={24} strokeWidth={2.5} />
+        </button>
+
         {/* Add Mapping Button - Directly Left */}
         <button
           onClick={() => {
@@ -437,7 +455,7 @@ export function Dashboard({ user, onLogout, onAddMapping, onViewMappings, mappin
           className={cn(
             "absolute w-14 h-14 bg-[#F2C94C] hover:bg-yellow-400 text-[#0A2D55] rounded-full shadow-lg hover:shadow-xl transition-all duration-300 ease-out active:scale-95 flex items-center justify-center",
             fabOpen
-              ? "opacity-100 bottom-20 right-16"
+              ? "opacity-100 bottom-20 right-20"
               : "opacity-0 bottom-0 right-0 pointer-events-none"
           )}
           title="Export to Excel"

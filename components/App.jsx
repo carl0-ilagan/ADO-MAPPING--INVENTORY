@@ -5,6 +5,7 @@ import { LoginPage } from '@/components/LoginPage';
 import { Dashboard } from '@/components/Dashboard';
 import { MappingForm } from '@/components/MappingFormClean';
 import { RightSplitModal } from '@/components/RightSplitModal';
+import { ProfilePage } from '@/components/ProfilePage';
 import { onAuthStateChangeListener, signOutUser } from '@/lib/firebaseAuth.js';
 import { getUserMappings, addMapping, deleteMapping } from '@/lib/firebaseDB.js';
 import { doc, getDoc } from 'firebase/firestore';
@@ -198,6 +199,10 @@ export function App() {
     setCurrentView('search');
   };
 
+  const handleViewProfile = () => {
+    setCurrentView('profile');
+  };
+
   // View Components
   if (!currentUser) {
     return <LoginPage onLogin={handleLogin} />;
@@ -210,6 +215,7 @@ export function App() {
         onLogout={handleLogout}
         onAddMapping={handleAddMapping}
         onViewMappings={handleViewMappings}
+        onViewProfile={handleViewProfile}
         onDeleteMapping={handleDeleteMapping}
         mappings={mappings}
         isLoadingMappings={isLoadingMappings}
@@ -229,6 +235,33 @@ export function App() {
       />
     </>
   );
+
+  if (currentView === 'profile') {
+    return (
+      <>
+        <ProfilePage
+          user={currentUser}
+          onBack={() => setCurrentView('dashboard')}
+          onLogout={handleLogout}
+          onAddMapping={handleAddMapping}
+          mappings={mappings}
+        />
+        <RightSplitModal
+          open={showAddMappingModal}
+          onOpenChange={setShowAddMappingModal}
+          title="Add New Mapping"
+          dismissOnSecondaryClick={true}
+          primaryChildren={
+            <MappingForm
+              isModal
+              onBack={() => setShowAddMappingModal(false)}
+              onSubmit={handleFormSubmit}
+            />
+          }
+        />
+      </>
+    );
+  }
 
   if (currentView === 'search') {
     return dashboardWithModal;
