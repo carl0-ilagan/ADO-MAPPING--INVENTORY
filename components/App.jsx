@@ -138,6 +138,74 @@ export function App() {
     }
   };
 
+  const handleImportMappings = async (records = []) => {
+    if (!currentUser || records.length === 0) return;
+
+    const existingBySurvey = new Map(
+      mappings.map((m) => [String(m.surveyNumber || '').trim().toLowerCase(), m])
+    );
+    const nextMappings = [...mappings];
+    let createdCount = 0;
+    let updatedCount = 0;
+    let skippedCount = 0;
+
+    try {
+      for (const record of records) {
+        const surveyNumber = String(record.surveyNumber || '').trim();
+        if (!surveyNumber) {
+          skippedCount += 1;
+          continue;
+        }
+
+        const municipalities = Array.isArray(record.municipalities)
+          ? record.municipalities
+          : (record.municipality ? String(record.municipality).split(',').map((v) => v.trim()).filter(Boolean) : []);
+        const barangays = Array.isArray(record.barangays)
+          ? record.barangays
+          : (record.barangays ? String(record.barangays).split(',').map((v) => v.trim()).filter(Boolean) : []);
+
+        const newMapping = {
+          userId: currentUser.uid,
+          surveyNumber,
+          region: record.region || '',
+          province: record.province || '',
+          municipality: municipalities.join(', '),
+          municipalities,
+          barangays,
+          icc: record.icc || [],
+          remarks: record.remarks || '',
+          totalArea: record.totalArea || 0,
+        };
+
+        const key = surveyNumber.toLowerCase();
+        const existing = existingBySurvey.get(key);
+
+        if (existing?.id) {
+          await updateMapping(existing.id, { ...newMapping, location: '' });
+          const idx = nextMappings.findIndex((m) => m.id === existing.id);
+          if (idx !== -1) nextMappings[idx] = { ...existing, ...newMapping };
+          updatedCount += 1;
+        } else {
+          const mappingId = await addMapping({ ...newMapping, location: '' });
+          nextMappings.push({ id: mappingId, ...newMapping });
+          createdCount += 1;
+        }
+      }
+
+      setMappings(nextMappings);
+      setToastTick((t) => t + 1);
+      setToast({
+        type: 'success',
+        message: `Import complete: ${createdCount} added, ${updatedCount} updated, ${skippedCount} skipped.`,
+      });
+    } catch (error) {
+      console.error('Error importing mappings:', error);
+      setToastTick((t) => t + 1);
+      setToast({ type: 'error', message: error?.message || 'Failed to import mappings.' });
+      throw error;
+    }
+  };
+
   const handleViewMappings = () => {
     setCurrentView('search');
   };
@@ -161,6 +229,7 @@ export function App() {
         onViewProfile={handleViewProfile}
         onEditMapping={handleEditMapping}
         onDeleteMapping={handleDeleteMapping}
+        onImportMappings={handleImportMappings}
         externalAlert={toast}
         externalAlertTick={toastTick}
         onClearExternalAlert={() => setToast(null)}

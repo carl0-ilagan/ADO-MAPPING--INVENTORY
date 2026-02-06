@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as XLSX from 'xlsx-js-style';
 import {
   Plus,
   Search,
   Download,
+  Upload,
   LogOut,
   Map as MapIcon,
   MapPin,
@@ -32,6 +33,7 @@ export function Dashboard({
   externalAlertTick = 0,
   onClearExternalAlert = () => {},
   mappings = [],
+  onImportMappings = () => {},
 }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -54,6 +56,7 @@ export function Dashboard({
   const [exportFileName, setExportFileName] = useState('');
   const [alert, setAlert] = useState(null);
   const [alertTick, setAlertTick] = useState(0);
+  const fileInputRef = useRef(null);
   const itemsPerPage = 15;
 
   const REGION_SHEETS = [
@@ -209,6 +212,338 @@ export function Dashboard({
   const handleSearch = (value) => {
     setSearchQuery(value);
     setCurrentPage(1);
+  };
+
+  const normalizeHeader = (value) => (
+    String(value || '')
+      .replace(/\u00a0/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase()
+  );
+
+  const compactHeader = (value) => normalizeHeader(value).replace(/[^a-z0-9]/g, '');
+
+  const splitListValue = (value) => {
+    if (!value) return [];
+    return String(value)
+      .split(',')
+      .map((v) => v.trim())
+      .filter(Boolean);
+  };
+
+  const splitIccValue = (value) => {
+    if (!value) return [];
+    return String(value)
+      .split(/[;,/]+/)
+      .map((v) => v.trim())
+      .filter(Boolean);
+  };
+
+  const splitLocationList = (value) => (
+    String(value || '')
+      .split(/,|&|\band\b/gi)
+      .map((v) => v.trim())
+      .filter(Boolean)
+  );
+
+  const parseLocationLine = (text) => {
+    const normalized = String(text || '').trim();
+    const lower = normalized.toLowerCase();
+    const colonIndex = normalized.indexOf(':');
+    const payload = colonIndex !== -1 ? normalized.slice(colonIndex + 1).trim() : normalized;
+
+    if (lower.startsWith('barangay')) {
+      return { type: 'barangay', items: splitLocationList(payload) };
+    }
+    if (lower.startsWith('municipality')) {
+      return { type: 'municipality', items: splitLocationList(payload) };
+    }
+    if (lower.startsWith('province')) {
+      return { type: 'province', items: splitLocationList(payload) };
+    }
+
+    return { type: 'unknown', items: [] };
+  };
+
+  const parseAreaValue = (value) => {
+    if (value === null || value === undefined || value === '') return 0;
+    if (typeof value === 'number') return value;
+    const parsed = Number(String(value).replace(/,/g, ''));
+    return Number.isNaN(parsed) ? 0 : parsed;
+  };
+
+  const handleImportFile = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const buffer = await file.arrayBuffer();
+      const wb = XLSX.read(buffer, { type: 'array' });
+      const headerKeywords = [
+        'survey',
+        'number',
+        'location',
+        'province',
+        'municipality',
+        'barangay',
+        'area',
+        'icc',
+        'remarks',
+        'region',
+        'sheet',
+      ];
+
+      const scoreHeaderRow = (row) => {
+        const normalizedCells = row.map((cell) => normalizeHeader(cell)).filter(Boolean);
+        const nonEmpty = normalizedCells.length;
+        let matches = 0;
+        normalizedCells.forEach((cell) => {
+          headerKeywords.forEach((key) => {
+            if (cell.includes(key)) matches += 1;
+          });
+        });
+        return { matches, nonEmpty };
+      };
+
+      const findHeaderRowIndex = (allRows) => {
+        let bestIndex = -1;
+        let bestMatches = -1;
+        let bestNonEmpty = -1;
+        const maxScan = Math.min(allRows.length, 200);
+
+        for (let i = 0; i < maxScan; i += 1) {
+          const row = allRows[i] || [];
+          const { matches, nonEmpty } = scoreHeaderRow(row);
+          if (matches > bestMatches || (matches === bestMatches && nonEmpty > bestNonEmpty)) {
+            bestIndex = i;
+            bestMatches = matches;
+            bestNonEmpty = nonEmpty;
+          }
+        }
+
+        if (bestMatches > 0) return bestIndex;
+
+        let fallbackIndex = -1;
+        let fallbackNonEmpty = -1;
+        for (let i = 0; i < maxScan; i += 1) {
+          const row = allRows[i] || [];
+          const nonEmpty = row.filter((cell) => String(cell || '').trim() !== '').length;
+          if (nonEmpty > fallbackNonEmpty) {
+            fallbackIndex = i;
+            fallbackNonEmpty = nonEmpty;
+          }
+        }
+
+        return fallbackNonEmpty >= 2 ? fallbackIndex : -1;
+      };
+
+      const buildRecordsFromRows = (rows, sheetName) => {
+        const headerRowIndex = findHeaderRowIndex(rows);
+        if (headerRowIndex === -1) return { records: [], error: 'no-header', sheetName };
+
+        const headerRow = rows[headerRowIndex].map(normalizeHeader);
+        const colIndex = (candidates) => headerRow.findIndex((h) => {
+          const compact = compactHeader(h);
+          return candidates.some((c) => {
+            const cNorm = normalizeHeader(c);
+            const cCompact = compactHeader(c);
+            return h === cNorm || h.includes(cNorm) || compact.includes(cCompact);
+          });
+        });
+
+        let surveyIdx = colIndex(['survey number', 'survey no', 'survey #']);
+        let locationIdx = colIndex(['location']);
+        let provinceIdx = colIndex(['province']);
+        let municipalityIdx = colIndex(['municipality', 'municipality/ies']);
+        let barangayIdx = colIndex(['barangays', 'barangay/s']);
+        let areaIdx = colIndex(['total area', 'area', 'area (ha)']);
+        let iccIdx = colIndex(['icc', 'iccs/ips', 'iccs', 'icc/ips']);
+        let remarksIdx = colIndex(['remarks']);
+        let regionIdx = colIndex(['region', 'sheet']);
+
+        let hasLocationFormat = locationIdx !== -1 && provinceIdx === -1 && municipalityIdx === -1 && barangayIdx === -1;
+
+        if (!hasLocationFormat && locationIdx === -1 && headerRow.length >= 5) {
+          const mergedHeader = compactHeader(headerRow.join(' '));
+          if (mergedHeader.includes('survey') && mergedHeader.includes('location') && mergedHeader.includes('area')) {
+            locationIdx = 1;
+            provinceIdx = -1;
+            municipalityIdx = -1;
+            barangayIdx = -1;
+            areaIdx = 2;
+            iccIdx = 3;
+            remarksIdx = 4;
+            regionIdx = -1;
+            hasLocationFormat = true;
+          }
+        }
+
+        if (!hasLocationFormat && surveyIdx === -1) {
+          if (headerRow.length >= 8) {
+            surveyIdx = 0;
+            provinceIdx = 1;
+            municipalityIdx = 2;
+            barangayIdx = 3;
+            areaIdx = 4;
+            iccIdx = 5;
+            remarksIdx = 6;
+            regionIdx = 7;
+          } else if (headerRow.length >= 5) {
+            surveyIdx = 0;
+            locationIdx = 1;
+            areaIdx = 2;
+            iccIdx = 3;
+            remarksIdx = 4;
+            regionIdx = -1;
+            hasLocationFormat = true;
+          }
+        }
+
+        if (!hasLocationFormat && [surveyIdx, provinceIdx, municipalityIdx, barangayIdx, areaIdx, iccIdx, remarksIdx].some((idx) => idx === -1)) {
+          return { records: [], error: 'invalid-headers', sheetName, found: rows[headerRowIndex] };
+        }
+
+        if (hasLocationFormat && [surveyIdx, locationIdx, areaIdx, iccIdx, remarksIdx].some((idx) => idx === -1)) {
+          return { records: [], error: 'invalid-headers', sheetName, found: rows[headerRowIndex] };
+        }
+
+        const records = [];
+        const fallbackRegion = detectRegionSheet(sheetName) || sheetName || '';
+
+        if (hasLocationFormat) {
+          let current = null;
+
+          const flushCurrent = () => {
+            if (!current) return;
+            const municipalities = Array.from(new Set(current.municipalities));
+            const barangays = Array.from(new Set(current.barangays));
+            const provinces = Array.from(new Set(current.provinces));
+            records.push({
+              surveyNumber: current.surveyNumber,
+              province: provinces.join(', '),
+              municipality: municipalities.join(', '),
+              municipalities,
+              barangays,
+              totalArea: current.totalArea,
+              icc: current.icc,
+              remarks: current.remarks,
+              region: fallbackRegion,
+            });
+          };
+
+          rows.slice(headerRowIndex + 1).forEach((row) => {
+            const surveyCell = String(row[surveyIdx] || '').trim();
+            const locationCell = String(row[locationIdx] || '').trim();
+            const areaCell = row[areaIdx];
+            const iccCellRaw = String(row[iccIdx] || '').trim();
+            const remarksCellRaw = String(row[remarksIdx] || '').trim();
+
+            if (surveyCell) {
+              flushCurrent();
+              const iccValue = iccCellRaw.toLowerCase() === 'void' ? '' : iccCellRaw;
+              const remarksValue = remarksCellRaw.toLowerCase() === 'void' ? '' : remarksCellRaw;
+              current = {
+                surveyNumber: surveyCell,
+                provinces: [],
+                municipalities: [],
+                barangays: [],
+                totalArea: parseAreaValue(areaCell),
+                icc: splitIccValue(iccValue),
+                remarks: remarksValue,
+              };
+            } else if (!current) {
+              return;
+            }
+
+            if (areaCell && current.totalArea === 0) {
+              current.totalArea = parseAreaValue(areaCell);
+            }
+
+            if (iccCellRaw && current.icc.length === 0) {
+              const iccValue = iccCellRaw.toLowerCase() === 'void' ? '' : iccCellRaw;
+              current.icc = splitIccValue(iccValue);
+            }
+
+            if (remarksCellRaw && !current.remarks) {
+              current.remarks = remarksCellRaw.toLowerCase() === 'void' ? '' : remarksCellRaw;
+            }
+
+            if (locationCell) {
+              const parsed = parseLocationLine(locationCell);
+              if (parsed.type === 'barangay') current.barangays.push(...parsed.items);
+              if (parsed.type === 'municipality') current.municipalities.push(...parsed.items);
+              if (parsed.type === 'province') current.provinces.push(...parsed.items);
+            }
+          });
+
+          flushCurrent();
+        } else {
+          rows.slice(headerRowIndex + 1).forEach((row) => {
+            const surveyNumber = String(row[surveyIdx] || '').trim();
+            if (!surveyNumber) return;
+
+            const province = String(row[provinceIdx] || '').trim();
+            const municipalityRaw = String(row[municipalityIdx] || '').trim();
+            const barangayRaw = String(row[barangayIdx] || '').trim();
+            const totalArea = parseAreaValue(row[areaIdx]);
+            const icc = splitIccValue(row[iccIdx]);
+            const remarks = String(row[remarksIdx] || '').trim();
+            const regionCell = regionIdx !== -1 ? String(row[regionIdx] || '').trim() : '';
+
+            const municipalities = splitListValue(municipalityRaw);
+            const barangays = splitListValue(barangayRaw);
+
+            records.push({
+              surveyNumber,
+              province,
+              municipality: municipalities.join(', '),
+              municipalities,
+              barangays,
+              totalArea,
+              icc,
+              remarks,
+              region: regionCell || fallbackRegion,
+            });
+          });
+        }
+
+        return { records, error: null, sheetName };
+      };
+
+      const allRecords = [];
+      const invalidSheets = [];
+
+      wb.SheetNames.forEach((sheetName) => {
+        const ws = wb.Sheets[sheetName];
+        if (!ws) return;
+        const wsRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+        const hasData = wsRows.some((row) => row.some((cell) => String(cell || '').trim() !== ''));
+        if (!hasData) return;
+
+        const { records, error } = buildRecordsFromRows(wsRows, sheetName);
+        if (error) {
+          invalidSheets.push(sheetName);
+          return;
+        }
+        allRecords.push(...records);
+      });
+
+      if (allRecords.length === 0) {
+        const sheetNote = invalidSheets.length > 0 ? ` Sheets without headers: ${invalidSheets.join(', ')}.` : '';
+        setAlertTick((t) => t + 1);
+        setAlert({ type: 'error', message: `No valid rows found to import.${sheetNote}` });
+        return;
+      }
+
+      await onImportMappings(allRecords);
+    } catch (error) {
+      console.error('Import failed:', error);
+      setAlertTick((t) => t + 1);
+      setAlert({ type: 'error', message: error?.message || 'Failed to import Excel file.' });
+    } finally {
+      event.target.value = '';
+    }
   };
 
   const buildExportWorkbook = () => {
@@ -448,6 +783,21 @@ export function Dashboard({
               </div>
 
               <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/15 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white ring-1 ring-white/20 backdrop-blur-md hover:bg-white/25 transition active:scale-95"
+                >
+                  <Upload size={16} className="sm:w-4.5 sm:h-4.5" />
+                  Upload Excel
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx,.xls"
+                  onChange={handleImportFile}
+                  className="hidden"
+                />
               </div>
             </div>
           </div>
