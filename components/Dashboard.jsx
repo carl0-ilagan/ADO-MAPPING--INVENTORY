@@ -19,6 +19,7 @@ import {
   Bell,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 export function Dashboard({
   user,
@@ -38,6 +39,8 @@ export function Dashboard({
   const [activeTab, setActiveTab] = useState('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [regionFilter, setRegionFilter] = useState('all');
+  const [remarksFilter, setRemarksFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [fabOpen, setFabOpen] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
@@ -199,8 +202,27 @@ export function Dashboard({
   }, [externalAlert, externalAlertTick, onClearExternalAlert]);
 
   // Filter mappings based on search query
+  const regionOptions = React.useMemo(() => {
+    const set = new Set();
+    mappings.forEach((m) => {
+      if (m.region) set.add(m.region);
+    });
+    const ordered = REGION_SHEETS.filter((r) => set.has(r));
+    const extras = Array.from(set).filter((r) => !REGION_SHEETS.includes(r)).sort();
+    return [{ value: 'all', label: 'All Regions' }, ...ordered.map((r) => ({ value: r, label: r })), ...extras.map((r) => ({ value: r, label: r }))];
+  }, [mappings]);
+
+  const remarksOptions = React.useMemo(() => ([
+    { value: 'all', label: 'All Remarks' },
+    { value: 'with', label: 'With Remarks' },
+    { value: 'none', label: 'No Remarks' },
+  ]), []);
+
   const filteredMappings = mappings.filter((mapping) => {
     const query = searchQuery.toLowerCase();
+    if (regionFilter !== 'all' && mapping.region !== regionFilter) return false;
+    if (remarksFilter === 'with' && String(mapping.remarks || '').trim() === '') return false;
+    if (remarksFilter === 'none' && String(mapping.remarks || '').trim() !== '') return false;
     return (
       mapping.surveyNumber?.toLowerCase().includes(query) ||
       mapping.region?.toLowerCase().includes(query) ||
@@ -951,23 +973,63 @@ export function Dashboard({
           <div className="animate-section-1">
             <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 animate-header">
               <h2 className="text-lg sm:text-2xl font-bold text-[#0A2D55]">All Mappings</h2>
-              <div className="w-full sm:w-auto flex items-center gap-2 bg-white border-2 border-[#0A2D55]/10 rounded-xl px-4 py-2.5 hover:border-[#F2C94C]/40 focus-within:border-[#F2C94C] focus-within:ring-2 focus-within:ring-[#F2C94C]/40 transition-all shadow-sm hover:shadow-md">
-                <Search size={18} className="text-[#0A2D55]/40 flex-shrink-0" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => handleSearch(e.target.value)}
-                  placeholder="Search survey number, location, ICC..."
-                  className="flex-1 bg-transparent border-none outline-none text-sm text-[#0A2D55] placeholder-[#0A2D55]/50 min-w-0"
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => handleSearch('')}
-                    className="text-[#0A2D55]/50 hover:text-[#0A2D55] transition flex-shrink-0"
+              <div className="w-full sm:w-auto flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                <div className="w-full sm:w-[320px] flex items-center gap-2 bg-white border-2 border-[#0A2D55]/10 rounded-xl px-4 py-2.5 hover:border-[#F2C94C]/40 focus-within:border-[#F2C94C] focus-within:ring-2 focus-within:ring-[#F2C94C]/40 transition-all shadow-sm hover:shadow-md">
+                  <Search size={18} className="text-[#0A2D55]/40 flex-shrink-0" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => handleSearch(e.target.value)}
+                    placeholder="Search survey number, location, ICC..."
+                    className="flex-1 bg-transparent border-none outline-none text-sm text-[#0A2D55] placeholder-[#0A2D55]/50 min-w-0"
+                  />
+                  {searchQuery && (
+                    <button
+                      onClick={() => handleSearch('')}
+                      className="text-[#0A2D55]/50 hover:text-[#0A2D55] transition flex-shrink-0"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                <div className="w-full sm:w-[200px]">
+                  <Select
+                    value={regionFilter}
+                    onValueChange={(value) => {
+                      setRegionFilter(value);
+                      setCurrentPage(1);
+                    }}
                   >
-                    ✕
-                  </button>
-                )}
+                    <SelectTrigger className="w-full bg-white border-2 border-[#0A2D55]/10 rounded-xl px-4 py-2.5 text-sm text-[#0A2D55] hover:border-[#F2C94C]/40 focus:ring-[#F2C94C]/40 shadow-sm">
+                      <SelectValue placeholder="All Regions" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white border-[#0A2D55]/10 rounded-xl shadow-2xl">
+                      {regionOptions.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="w-full sm:w-[200px]">
+                  <Select
+                    value={remarksFilter}
+                    onValueChange={(value) => {
+                      setRemarksFilter(value);
+                      setCurrentPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="w-full bg-white border-2 border-[#0A2D55]/10 rounded-xl px-4 py-2.5 text-sm text-[#0A2D55] hover:border-[#F2C94C]/40 focus:ring-[#F2C94C]/40 shadow-sm">
+                      <SelectValue placeholder="All Remarks" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white border-[#0A2D55]/10 rounded-xl shadow-2xl">
+                      {remarksOptions.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
 
@@ -1149,13 +1211,15 @@ export function Dashboard({
                       onClick={() => setCurrentPage(currentPage - 1)}
                       disabled={!canGoPrevious}
                       className={cn(
-                        'flex items-center gap-1 px-3 sm:px-4 py-2 rounded-lg font-semibold text-sm transition',
+                        'flex items-center justify-center gap-1 px-2.5 sm:px-4 py-2 rounded-lg font-semibold text-xs sm:text-sm transition',
                         canGoPrevious
                           ? 'bg-[#0A2D55] text-white hover:bg-[#0C3B6E] active:scale-95 shadow-md'
                           : 'bg-[#0A2D55]/20 text-[#0A2D55]/50 cursor-not-allowed'
                       )}
+                      aria-label="Previous page"
                     >
-                      ← Previous
+                      <span className="sm:hidden">←</span>
+                      <span className="hidden sm:inline">← Previous</span>
                     </button>
                     <div className="text-xs sm:text-sm text-[#0A2D55] font-semibold px-2 py-1">
                       Page <span className="text-[#F2C94C]">{currentPage}</span> of <span className="text-[#F2C94C]">{totalPages || 1}</span>
@@ -1164,13 +1228,15 @@ export function Dashboard({
                       onClick={() => setCurrentPage(currentPage + 1)}
                       disabled={!canGoNext}
                       className={cn(
-                        'flex items-center gap-1 px-3 sm:px-4 py-2 rounded-lg font-semibold text-sm transition',
+                        'flex items-center justify-center gap-1 px-2.5 sm:px-4 py-2 rounded-lg font-semibold text-xs sm:text-sm transition',
                         canGoNext
                           ? 'bg-[#0A2D55] text-white hover:bg-[#0C3B6E] active:scale-95 shadow-md'
                           : 'bg-[#0A2D55]/20 text-[#0A2D55]/50 cursor-not-allowed'
                       )}
+                      aria-label="Next page"
                     >
-                      Next →
+                      <span className="sm:hidden">→</span>
+                      <span className="hidden sm:inline">Next →</span>
                     </button>
                   </div>
                 </div>

@@ -328,10 +328,10 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
     <div className="min-h-full bg-transparent">
 
       {/* Main Content */}
-      <main className="w-full px-3 sm:px-4 pb-6">
+      <main className="w-full px-3 sm:px-4 pb-2 sm:pb-3">
         {/* Profile Card */}
         <div className="bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col border border-[#0A2D55]/5">
-          <div className="border-b px-6 py-5 bg-gradient-to-r from-[#0A2D55]/5 via-[#F2C94C]/10 to-transparent">
+          <div className="border-b px-5 sm:px-6 py-4 sm:py-5 bg-gradient-to-r from-[#0A2D55]/5 via-[#F2C94C]/10 to-transparent">
             <div className="flex items-center justify-between">
               <div>
                 <h1 className="font-bold text-xl text-[#0A2D55]">Profile Details</h1>
@@ -341,20 +341,20 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
           </div>
 
           {/* Profile Information */}
-          <div className="p-6 sm:p-7 space-y-4">
+          <div className="p-3 sm:p-5 space-y-2.5 sm:space-y-3">
             {/* Email */}
-            <div className="flex items-start gap-4 p-5 bg-gradient-to-br from-gray-50 to-white rounded-xl border border-gray-200 hover:border-[#0A2D55]/20 transition-all group">
-              <div className="w-12 h-12 bg-[#0A2D55]/10 rounded-xl flex items-center justify-center flex-shrink-0">
-                <Mail size={22} className="text-[#0A2D55]" />
+            <div className="flex items-start gap-3 sm:gap-4 p-3.5 sm:p-4 bg-gradient-to-br from-gray-50 to-white rounded-xl border border-gray-200 hover:border-[#0A2D55]/20 transition-all group">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-[#0A2D55]/10 rounded-xl flex items-center justify-center flex-shrink-0">
+                <Mail size={20} className="text-[#0A2D55]" />
               </div>
               <div className="flex-1 min-w-0">
                 <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
                   Email Address
                 </label>
-                <p className="text-base sm:text-lg text-gray-900 font-medium mt-1 truncate">
+                <p className="text-sm sm:text-lg text-gray-900 font-medium mt-1 truncate">
                   {user?.email || 'Not available'}
                 </p>
-                <p className="text-xs text-gray-500 mt-1">
+                <p className="text-[11px] sm:text-xs text-gray-500 mt-1">
                   Update to your official email for password recovery
                 </p>
               </div>
@@ -364,7 +364,7 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
                   setNewEmail(user?.email || '');
                   setEmailError('');
                 }}
-                className="flex-shrink-0 w-9 h-9 bg-[#0A2D55]/10 hover:bg-[#0A2D55]/20 rounded-lg flex items-center justify-center transition-all opacity-0 group-hover:opacity-100"
+                className="flex-shrink-0 w-9 h-9 bg-[#0A2D55]/10 hover:bg-[#0A2D55]/20 rounded-lg flex items-center justify-center transition-all opacity-100"
                 title="Update Email"
               >
                 <Edit2 size={16} className="text-[#0A2D55]" />
@@ -372,15 +372,15 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
             </div>
 
             {/* Role */}
-            <div className="flex items-start gap-4 p-5 bg-gradient-to-br from-gray-50 to-white rounded-xl border border-gray-200 hover:border-[#0A2D55]/20 transition-all">
-              <div className="w-12 h-12 bg-[#0A2D55]/10 rounded-xl flex items-center justify-center flex-shrink-0">
-                <Shield size={22} className="text-[#0A2D55]" />
+            <div className="flex items-start gap-3 sm:gap-4 p-3.5 sm:p-4 bg-gradient-to-br from-gray-50 to-white rounded-xl border border-gray-200 hover:border-[#0A2D55]/20 transition-all">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-[#0A2D55]/10 rounded-xl flex items-center justify-center flex-shrink-0">
+                <Shield size={20} className="text-[#0A2D55]" />
               </div>
               <div className="flex-1 min-w-0">
                 <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
                   Role
                 </label>
-                <p className="text-base sm:text-lg text-gray-900 font-medium mt-1 capitalize">
+                <p className="text-sm sm:text-lg text-gray-900 font-medium mt-1 capitalize">
                   {user?.role || 'User'}
                 </p>
               </div>
@@ -388,15 +388,15 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
 
             {/* Community */}
             {user?.communityName && (
-              <div className="flex items-start gap-4 p-5 bg-gradient-to-br from-gray-50 to-white rounded-xl border border-gray-200 hover:border-[#0A2D55]/20 transition-all">
-                <div className="w-12 h-12 bg-[#0A2D55]/10 rounded-xl flex items-center justify-center flex-shrink-0">
-                  <Building2 size={22} className="text-[#0A2D55]" />
+              <div className="flex items-start gap-3 sm:gap-4 p-3.5 sm:p-4 bg-gradient-to-br from-gray-50 to-white rounded-xl border border-gray-200 hover:border-[#0A2D55]/20 transition-all">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-[#0A2D55]/10 rounded-xl flex items-center justify-center flex-shrink-0">
+                  <Building2 size={20} className="text-[#0A2D55]" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
                     Community
                   </label>
-                  <p className="text-base sm:text-lg text-gray-900 font-medium mt-1">
+                  <p className="text-sm sm:text-lg text-gray-900 font-medium mt-1">
                     {user.communityName}
                   </p>
                 </div>
@@ -404,22 +404,22 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
             )}
 
             {/* User ID */}
-            <div className="flex items-start gap-4 p-5 bg-gradient-to-br from-gray-50 to-white rounded-xl border border-gray-200 hover:border-[#0A2D55]/20 transition-all">
-              <div className="w-12 h-12 bg-[#0A2D55]/10 rounded-xl flex items-center justify-center flex-shrink-0">
-                <User size={22} className="text-[#0A2D55]" />
+            <div className="flex items-start gap-3 sm:gap-4 p-3.5 sm:p-4 bg-gradient-to-br from-gray-50 to-white rounded-xl border border-gray-200 hover:border-[#0A2D55]/20 transition-all">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-[#0A2D55]/10 rounded-xl flex items-center justify-center flex-shrink-0">
+                <User size={20} className="text-[#0A2D55]" />
               </div>
               <div className="flex-1 min-w-0">
                 <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
                   User ID
                 </label>
-                <p className="text-xs sm:text-sm text-gray-600 font-mono mt-1 break-all">
+                <p className="text-[11px] sm:text-sm text-gray-600 font-mono mt-1 break-all">
                   {user?.uid || 'Not available'}
                 </p>
               </div>
             </div>
 
             {/* Change Password Button */}
-            <div className="pt-6 border-t border-gray-200">
+            <div className="pt-3 sm:pt-4 border-t border-gray-200 flex justify-stretch sm:justify-end">
               <button
                 onClick={() => {
                   setShowPasswordModal(true);
@@ -428,7 +428,7 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
                   setNewPassword('');
                   setConfirmPassword('');
                 }}
-                className="w-full flex items-center justify-center gap-3 px-6 py-3.5 bg-gradient-to-r from-[#0A2D55] to-[#0C3B6E] hover:shadow-xl text-white rounded-xl font-semibold transition-all active:scale-95 shadow-lg"
+                className="w-full sm:w-auto sm:min-w-[220px] flex items-center justify-center gap-3 px-6 py-3.5 bg-gradient-to-r from-[#0A2D55] to-[#0C3B6E] hover:shadow-xl text-white rounded-xl font-semibold transition-all active:scale-95 shadow-lg"
               >
                 <Key size={20} />
                 Change Password

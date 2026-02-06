@@ -459,7 +459,11 @@ export default function MappingForm({
       return;
     }
     const allowed = new Set(renderBarangays(selectedMunicipalityCodes).map((b) => String(b.code)));
-    const next = new Set(Array.from(selectedBarangayCodes).filter((c) => allowed.has(String(c))));
+    const allBarangayCodes = new Set(barangaysAll.map((b) => String(b.code)));
+    const next = new Set(Array.from(selectedBarangayCodes).filter((c) => {
+      const key = String(c);
+      return allowed.has(key) || !allBarangayCodes.has(key);
+    }));
     if (next.size !== selectedBarangayCodes.size) setSelectedBarangayCodes(next);
   }, [selectedMunicipalityCodes, barangaysAll]);
 
