@@ -50,6 +50,26 @@ const ICC_IP_OPTIONS = [
   "Yakan",
 ];
 
+const REGION_LABELS = {
+  "01": "Region I",
+  "02": "Region II",
+  "03": "Region III",
+  "04": "Region IV-A",
+  "05": "Region V",
+  "06": "Region VI",
+  "07": "Region VII",
+  "08": "Region VIII",
+  "09": "Region IX",
+  "10": "Region X",
+  "11": "Region XI",
+  "12": "Region XII",
+  "13": "Region XIII",
+  "14": "CAR",
+  "17": "Region IV-B",
+};
+
+const REGION_ORDER = ["14", "01", "02", "03", "04", "17", "05", "06", "07", "08", "09", "10", "11", "12", "13"];
+
 async function fetchJson(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${url} ${res.status}`);
@@ -236,6 +256,7 @@ export default function MappingForm({
   const [barangaysAll, setBarangaysAll] = useState([]);
 
   const regionMap = useRef(new Map()).current;
+  const regionNameMap = useRef(new Map()).current;
   const provinceMap = useRef(new Map()).current;
   const municipalityMap = useRef(new Map()).current;
   const barangayMap = useRef(new Map()).current;
@@ -287,11 +308,21 @@ export default function MappingForm({
       try {
         const regs = await fetchJson(PSGC.REGIONS);
         if (!mounted) return;
-        
-        const rlist = regs.map((r) => ({ code: r.regionCode || r.code, name: r.name }));
-        
-        rlist.forEach((r) => regionMap.set(String(r.code), r.name));
-        setRegions(rlist);
+
+        regs.forEach((r) => {
+          const code = String(r.regionCode || r.code || "");
+          regionNameMap.set(normalize(r.name), code);
+        });
+
+        const regionList = REGION_ORDER.map((key) => {
+          const match = regs.find((r) => String(r.regionCode || r.code || "").startsWith(key));
+          const code = String(match?.regionCode || match?.code || key);
+          const label = REGION_LABELS[key] || match?.name || key;
+          regionMap.set(code, label);
+          return { code, name: label };
+        });
+
+        setRegions(regionList);
 
         const provs = await fetchJson(PSGC.PROVINCES);
         if (!mounted) return;
@@ -325,8 +356,11 @@ export default function MappingForm({
 
     const resolveByName = (list, name) => {
       if (!name) return null;
-      const found = list.find((o) => normalize(o.name) === normalize(name));
-      return found ? found.code : name;
+      const normalized = normalize(name);
+      const found = list.find((o) => normalize(o.name) === normalized);
+      if (found) return found.code;
+      const apiCode = regionNameMap.get(normalized);
+      return apiCode || name;
     };
 
     const municipalityNames = getMunicipalityNames(initialData);

@@ -56,6 +56,8 @@ export function Dashboard({
   const [exportFileName, setExportFileName] = useState('');
   const [alert, setAlert] = useState(null);
   const [alertTick, setAlertTick] = useState(0);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
   const fileInputRef = useRef(null);
   const itemsPerPage = 15;
 
@@ -99,12 +101,23 @@ export function Dashboard({
     if (!value) return null;
     if (value.includes('CORDILLERA') || value.includes('CAR')) return 'CAR';
 
-    const match = value.match(/REGION\s*(I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII)(?:\s*[-–]\s*(A|B))?/i);
-    if (match) {
-      const numeral = match[1].toUpperCase();
-      const suffix = match[2] ? match[2].toUpperCase() : null;
+    const romanMatch = value.match(/REGION\s*(XIII|XII|XI|X|IX|VIII|VII|VI|V|IV|III|II|I)(?:\s*[-–]\s*(A|B))?/i);
+    if (romanMatch) {
+      const numeral = romanMatch[1].toUpperCase();
+      const suffix = romanMatch[2] ? romanMatch[2].toUpperCase() : null;
       if (numeral === 'IV' && suffix) return `Region IV-${suffix}`;
       return `Region ${numeral}`;
+    }
+
+    const numericMatch = value.match(/REGION\s*(\d{1,2})(?:\s*[-–]?\s*([AB]))?/i) || value.match(/\b(\d{1,2})(?:\s*[-–]?\s*([AB]))?\b/);
+    if (numericMatch) {
+      const numberValue = Number(numericMatch[1]);
+      const suffix = numericMatch[2] ? numericMatch[2].toUpperCase() : null;
+      if (numberValue === 4 && suffix) return `Region IV-${suffix}`;
+      if (numberValue >= 1 && numberValue <= 13) {
+        const romanMap = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII'];
+        return `Region ${romanMap[numberValue - 1]}`;
+      }
     }
 
     for (const entry of REGION_KEYWORDS) {
@@ -278,6 +291,8 @@ export function Dashboard({
     if (!file) return;
 
     try {
+      setIsImporting(true);
+      setImportProgress(5);
       const buffer = await file.arrayBuffer();
       const wb = XLSX.read(buffer, { type: 'array' });
       const headerKeywords = [
@@ -389,6 +404,15 @@ export function Dashboard({
             iccIdx = 5;
             remarksIdx = 6;
             regionIdx = 7;
+          } else if (headerRow.length >= 7) {
+            surveyIdx = 0;
+            provinceIdx = 1;
+            municipalityIdx = 2;
+            barangayIdx = 3;
+            areaIdx = 4;
+            iccIdx = 5;
+            remarksIdx = 6;
+            regionIdx = -1;
           } else if (headerRow.length >= 5) {
             surveyIdx = 0;
             locationIdx = 1;
@@ -513,20 +537,29 @@ export function Dashboard({
 
       const allRecords = [];
       const invalidSheets = [];
+      const dataSheets = wb.SheetNames.filter((sheetName) => {
+        const ws = wb.Sheets[sheetName];
+        if (!ws) return false;
+        const wsRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+        return wsRows.some((row) => row.some((cell) => String(cell || '').trim() !== ''));
+      });
 
-      wb.SheetNames.forEach((sheetName) => {
+      const totalSheets = dataSheets.length || 1;
+
+      dataSheets.forEach((sheetName, index) => {
         const ws = wb.Sheets[sheetName];
         if (!ws) return;
         const wsRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-        const hasData = wsRows.some((row) => row.some((cell) => String(cell || '').trim() !== ''));
-        if (!hasData) return;
 
         const { records, error } = buildRecordsFromRows(wsRows, sheetName);
         if (error) {
           invalidSheets.push(sheetName);
-          return;
+        } else {
+          allRecords.push(...records);
         }
-        allRecords.push(...records);
+
+        const progress = 10 + Math.round(((index + 1) / totalSheets) * 70);
+        setImportProgress(progress);
       });
 
       if (allRecords.length === 0) {
@@ -536,12 +569,20 @@ export function Dashboard({
         return;
       }
 
+      setImportProgress(90);
       await onImportMappings(allRecords);
+      setImportProgress(100);
+      setAlertTick((t) => t + 1);
+      setAlert({ type: 'success', message: `Import successful. ${allRecords.length} records added.` });
     } catch (error) {
       console.error('Import failed:', error);
       setAlertTick((t) => t + 1);
       setAlert({ type: 'error', message: error?.message || 'Failed to import Excel file.' });
     } finally {
+      setTimeout(() => {
+        setIsImporting(false);
+        setImportProgress(0);
+      }, 600);
       event.target.value = '';
     }
   };
@@ -715,6 +756,22 @@ export function Dashboard({
                 <Bell className="h-4 w-4 text-current" aria-hidden />
               </div>
               <p className="leading-snug">{(externalAlert || alert).message}</p>
+            </div>
+          </div>
+        </div>
+      )}
+      {isImporting && (
+        <div className="fixed z-[119] right-4 top-[88px] w-[min(92vw,360px)] sm:w-96">
+          <div className="rounded-xl border border-white/20 bg-white/10 backdrop-blur-xl p-3 shadow-2xl shadow-black/30">
+            <div className="flex items-center justify-between text-xs text-white/80">
+              <span>Importing Excel...</span>
+              <span>{importProgress}%</span>
+            </div>
+            <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/10">
+              <div
+                className="h-full rounded-full bg-[#F2C94C] transition-all"
+                style={{ width: `${importProgress}%` }}
+              />
             </div>
           </div>
         </div>
