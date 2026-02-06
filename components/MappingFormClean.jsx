@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { ChevronDown, ArrowLeft } from "lucide-react";
+import { ChevronDown, ArrowLeft, Bell } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const PSGC = {
@@ -222,7 +222,14 @@ function SearchableSelect({ options = [], selected = null, onChange = () => {}, 
   );
 }
 
-export default function MappingForm({ isModal = false, onBack = () => {}, onSubmit = () => {} }) {
+export default function MappingForm({
+  isModal = false,
+  onBack = () => {},
+  onSubmit = () => {},
+  initialData = null,
+  formTitle = "Add New Mapping",
+  submitLabel = "Save Mapping",
+}) {
   const [regions, setRegions] = useState([]);
   const [provincesAll, setProvincesAll] = useState([]);
   const [municipalitiesAll, setMunicipalitiesAll] = useState([]);
@@ -243,6 +250,36 @@ export default function MappingForm({ isModal = false, onBack = () => {}, onSubm
   const [totalArea, setTotalArea] = useState("");
   const [remarks, setRemarks] = useState("");
   const [errors, setErrors] = useState({});
+  const [isHydrating, setIsHydrating] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [alert, setAlert] = useState(null);
+  const [alertTick, setAlertTick] = useState(0);
+
+  const normalize = (value) => String(value || "").trim().toLowerCase();
+
+  const getMunicipalityNames = (data) => {
+    if (!data) return [];
+    if (Array.isArray(data.municipalities)) return data.municipalities.filter(Boolean);
+    if (typeof data.municipality === "string") {
+      return data.municipality.split(",").map((v) => v.trim()).filter(Boolean);
+    }
+    return [];
+  };
+
+  const getBarangayNames = (data) => {
+    if (!data) return [];
+    if (Array.isArray(data.barangays)) return data.barangays.filter(Boolean);
+    if (typeof data.barangays === "string") {
+      return data.barangays.split(",").map((v) => v.trim()).filter(Boolean);
+    }
+    return [];
+  };
+
+  useEffect(() => {
+    if (!alert) return;
+    const timeoutId = setTimeout(() => setAlert(null), 10_000);
+    return () => clearTimeout(timeoutId);
+  }, [alertTick, alert]);
 
   useEffect(() => {
     let mounted = true;
@@ -251,31 +288,7 @@ export default function MappingForm({ isModal = false, onBack = () => {}, onSubm
         const regs = await fetchJson(PSGC.REGIONS);
         if (!mounted) return;
         
-        // Filter to only CAR and Region I to XIII
-        // PSGC returns regions like "REGION I (ILOCOS REGION)", "REGION II (CAGAYAN VALLEY)", etc.
-        const rlist = regs
-          .map((r) => ({ code: r.regionCode || r.code, name: r.name }))
-          .filter((r) => {
-            const regionName = r.name.toUpperCase();
-            
-            // Match CAR/Cordillera
-            if (regionName.includes('CAR') || regionName.includes('CORDILLERA')) {
-              return true;
-            }
-            
-            // Match Region I through XIII (including IV-A, IV-B)
-            const romanNumerals = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII'];
-            const matchesRoman = romanNumerals.some(numeral => {
-              // Match "REGION I", "REGION II", etc. at the start
-              const pattern1 = new RegExp(`^REGION\\s+${numeral}\\b`, 'i');
-              const pattern2 = new RegExp(`^REGION\\s+${numeral}-[AB]\\b`, 'i');
-              return pattern1.test(regionName) || pattern2.test(regionName);
-            });
-            
-            return matchesRoman;
-          });
-        
-        console.log('Filtered regions:', rlist.map(r => r.name));
+        const rlist = regs.map((r) => ({ code: r.regionCode || r.code, name: r.name }));
         
         rlist.forEach((r) => regionMap.set(String(r.code), r.name));
         setRegions(rlist);
@@ -305,6 +318,55 @@ export default function MappingForm({ isModal = false, onBack = () => {}, onSubm
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!initialData) return;
+    setIsHydrating(true);
+
+    const resolveByName = (list, name) => {
+      if (!name) return null;
+      const found = list.find((o) => normalize(o.name) === normalize(name));
+      return found ? found.code : name;
+    };
+
+    const municipalityNames = getMunicipalityNames(initialData);
+    const barangayNames = getBarangayNames(initialData);
+
+    const regionCode = resolveByName(regions, initialData.region);
+    const provinceCode = resolveByName(provincesAll, initialData.province);
+    const municipalityCodes = municipalityNames.map((name) => {
+      const found = municipalitiesAll.find((m) => normalize(m.name) === normalize(name));
+      return found ? found.code : name;
+    });
+    const municipalityCodeSet = new Set(municipalityCodes.map(String));
+    const barangayCodes = barangayNames.map((name) => {
+      const found = barangaysAll.find((b) => {
+        const nameMatch = normalize(b.name) === normalize(name);
+        if (!nameMatch) return false;
+        if (municipalityCodeSet.size === 0) return true;
+        return municipalityCodeSet.has(String(b.municipalityCode)) || municipalityCodeSet.has(String(b.cityCode));
+      });
+      return found ? found.code : name;
+    });
+
+    const totalAreaValue = initialData.totalArea;
+    const formattedTotalArea =
+      typeof totalAreaValue === "number"
+        ? totalAreaValue.toLocaleString("en-US", { maximumFractionDigits: 4 })
+        : (totalAreaValue ?? "");
+
+    setSurveyNumber(initialData.surveyNumber || "");
+    setTotalArea(String(formattedTotalArea || ""));
+    setRemarks(initialData.remarks || "");
+    setSelectedRegionCode(regionCode);
+    setSelectedProvinceCode(provinceCode);
+    setSelectedMunicipalityCodes(new Set(municipalityCodes));
+    setSelectedBarangayCodes(new Set(barangayCodes));
+    setSelectedIccIpCodes(new Set(Array.isArray(initialData.icc) ? initialData.icc : []));
+    setErrors({});
+
+    setTimeout(() => setIsHydrating(false), 0);
+  }, [initialData, regions, provincesAll, municipalitiesAll, barangaysAll]);
 
   const renderProvinces = (regionCode) => {
     if (!regionCode) return [];
@@ -344,17 +406,20 @@ export default function MappingForm({ isModal = false, onBack = () => {}, onSubm
   };
 
   useEffect(() => {
+    if (isHydrating) return;
     setSelectedProvinceCode(null);
     setSelectedMunicipalityCodes(new Set());
     setSelectedBarangayCodes(new Set());
-  }, [selectedRegionCode]);
+  }, [selectedRegionCode, isHydrating]);
 
   useEffect(() => {
+    if (isHydrating) return;
     setSelectedMunicipalityCodes(new Set());
     setSelectedBarangayCodes(new Set());
-  }, [selectedProvinceCode]);
+  }, [selectedProvinceCode, isHydrating]);
 
   useEffect(() => {
+    if (isHydrating) return;
     if (!selectedMunicipalityCodes || selectedMunicipalityCodes.size === 0) {
       setSelectedBarangayCodes(new Set());
       return;
@@ -375,9 +440,11 @@ export default function MappingForm({ isModal = false, onBack = () => {}, onSubm
     return Object.keys(e).length === 0;
   };
 
-  const handleSave = (ev) => {
+  const handleSave = async (ev) => {
     ev.preventDefault();
     if (!validate()) return;
+    setAlert(null);
+    setIsSaving(true);
 
     const regionName = regionMap.get(String(selectedRegionCode)) || selectedRegionCode || "";
     
@@ -398,31 +465,70 @@ export default function MappingForm({ isModal = false, onBack = () => {}, onSubm
       
     const iccIpNames = Array.from(selectedIccIpCodes);
 
-    onSubmit({
-      surveyNumber: surveyNumber.trim(),
-      region: regionName,
-      province: provinceName,
-      municipalities: municipalityNames,
-      barangays: barangayNames,
-      icc: iccIpNames,
-      remarks: remarks.trim(),
-      totalArea: parseTotalArea(totalArea),
-    });
+    try {
+      await onSubmit({
+        surveyNumber: surveyNumber.trim(),
+        region: regionName,
+        province: provinceName,
+        municipalities: municipalityNames,
+        barangays: barangayNames,
+        icc: iccIpNames,
+        remarks: remarks.trim(),
+        totalArea: parseTotalArea(totalArea),
+      });
 
-    setSurveyNumber("");
-    setTotalArea("");
-    setRemarks("");
-    setSelectedRegionCode(null);
-    setSelectedProvinceCode(null);
-    setSelectedMunicipalityCodes(new Set());
-    setSelectedBarangayCodes(new Set());
-    setSelectedIccIpCodes(new Set());
-    setErrors({});
+      if (!isModal) {
+        setAlertTick((t) => t + 1);
+        setAlert({ type: "success", message: "Mapping saved successfully." });
+      }
+
+      setSurveyNumber("");
+      setTotalArea("");
+      setRemarks("");
+      setSelectedRegionCode(null);
+      setSelectedProvinceCode(null);
+      setSelectedMunicipalityCodes(new Set());
+      setSelectedBarangayCodes(new Set());
+      setSelectedIccIpCodes(new Set());
+      setErrors({});
+
+      if (isModal) {
+        // Close handled by parent after submit
+      }
+    } catch (error) {
+      if (!isModal) {
+        setAlertTick((t) => t + 1);
+        setAlert({ type: "error", message: error?.message || "Failed to save mapping." });
+      }
+    } finally {
+      setIsSaving(false);
+    }
   };
 
 
   return (
     <div className={isModal ? "w-full min-h-full flex flex-col" : "min-h-screen py-6 sm:py-10 bg-gradient-to-br from-[#071A2C]/5 via-white to-[#F2C94C]/10"}>
+      {!isModal && alert && (
+        <div className="fixed z-[120] right-4 bottom-4 sm:bottom-auto sm:top-4 w-[min(92vw,360px)] sm:w-96">
+          <div
+            key={alertTick}
+            role="alert"
+            className={[
+              "ncip-animate-alert-in rounded-xl border p-3 text-xs sm:text-sm backdrop-blur-xl shadow-2xl shadow-black/30",
+              alert.type === "error"
+                ? "ncip-animate-shake bg-red-500/15 border-red-500/30 text-red-50"
+                : "bg-emerald-400/15 border-emerald-300/30 text-emerald-50",
+            ].join(" ")}
+          >
+            <div className="flex items-start gap-2">
+              <div className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-lg bg-white/10 ring-1 ring-white/10">
+                <Bell className="h-4 w-4 text-current" aria-hidden />
+              </div>
+              <p className="leading-snug">{alert.message}</p>
+            </div>
+          </div>
+        </div>
+      )}
       <div className={isModal ? "w-full flex-1 flex flex-col min-h-0" : "max-w-4xl mx-auto px-4 sm:px-6"}>
         {!isModal && (
           <button onClick={onBack} className="flex items-center gap-2 text-[#0A2D55] font-semibold mb-6 hover:gap-3 transition">
@@ -430,18 +536,32 @@ export default function MappingForm({ isModal = false, onBack = () => {}, onSubm
           </button>
         )}
 
-        <div className="bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col border border-[#0A2D55]/5">
+        <div className="bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col border border-[#0A2D55]/5 min-h-0 relative">
           <div className="border-b px-6 py-5 bg-gradient-to-r from-[#0A2D55]/5 via-[#F2C94C]/10 to-transparent">
             <div className="flex items-center justify-between">
               <div>
-                <h1 className="font-bold text-xl text-[#0A2D55]">Add New Mapping</h1>
+                <h1 className="font-bold text-xl text-[#0A2D55]">{formTitle}</h1>
                 <p className="text-sm text-[#0A2D55]/55 mt-1">Indigenous Cultural Community mapping record</p>
               </div>
             </div>
           </div>
 
-          <form onSubmit={handleSave} className="flex-1 p-4 sm:p-7">
-            <div className="space-y-6">
+          {isSaving && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#071A2C]/20 backdrop-blur-md">
+              <div className="flex flex-col items-center gap-3">
+                <div className="rounded-full border border-white/20 bg-white/10 backdrop-blur-xl shadow-xl shadow-black/30 p-4">
+                  <div className="h-12 w-12 rounded-full border-2 border-white/25 border-t-[#F2C94C] animate-spin" />
+                </div>
+                <div className="rounded-full border border-white/15 bg-white/10 backdrop-blur-xl px-4 py-2 text-xs text-white/90">
+                  Saving...
+                </div>
+              </div>
+            </div>
+          )}
+
+          <form onSubmit={handleSave} className="flex-1 flex flex-col min-h-0">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden hide-scrollbar p-4 sm:p-7">
+              <div className="space-y-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block font-semibold text-[#0A2D55] mb-2">Survey Number <span className="text-red-500">*</span></label>
@@ -555,11 +675,24 @@ export default function MappingForm({ isModal = false, onBack = () => {}, onSubm
                 <label className="block font-semibold text-[#0A2D55] mb-2">Remarks</label>
                 <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
               </div>
+              </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-3 mt-6 justify-end">
-              <button type="button" onClick={onBack} className="w-full sm:w-auto px-5 py-2.5 border-2 border-[#0A2D55]/15 text-[#0A2D55] rounded-xl hover:bg-[#0A2D55]/5 transition">Cancel</button>
-              <button type="submit" className="w-full sm:w-auto px-6 py-2.5 bg-gradient-to-r from-[#0A2D55] to-[#0C3B6E] text-white rounded-xl shadow-md hover:shadow-lg transition">Save Mapping</button>
+            <div className="sticky bottom-0 bg-white/95 backdrop-blur border-t border-[#0A2D55]/10 px-4 sm:px-7 py-4">
+              <div className="flex flex-col sm:flex-row gap-3 justify-end">
+                <button type="button" onClick={onBack} disabled={isSaving} className={cn("w-full sm:w-auto px-5 py-2.5 border-2 border-[#0A2D55]/15 text-[#0A2D55] rounded-xl hover:bg-[#0A2D55]/5 transition", isSaving ? "opacity-60 cursor-not-allowed" : "")}>Cancel</button>
+                <button
+                  type="submit"
+                  disabled={isSaving}
+                  className={cn(
+                    "w-full sm:w-auto px-6 py-2.5 bg-gradient-to-r from-[#0A2D55] to-[#0C3B6E] text-white rounded-xl shadow-md hover:shadow-lg transition flex items-center justify-center gap-2",
+                    isSaving ? "opacity-75 cursor-not-allowed" : ""
+                  )}
+                >
+                  {isSaving && <span className="h-4 w-4 rounded-full border-2 border-white/40 border-t-white animate-spin" />}
+                  {isSaving ? "Saving..." : submitLabel}
+                </button>
+              </div>
             </div>
           </form>
 

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import * as XLSX from 'xlsx-js-style';
 import { ArrowLeft, User, Mail, Shield, Building2, LogOut, Edit2, Key, Lock, Eye, EyeOff, Check, X, Plus, Download, Home } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { updateUserEmail, updateUserPassword } from '@/lib/firebaseAuth.js';
@@ -32,6 +33,86 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isClosingPasswordModal, setIsClosingPasswordModal] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [isClosingExportModal, setIsClosingExportModal] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportFileName, setExportFileName] = useState('');
+  const [exportError, setExportError] = useState('');
+
+  const REGION_SHEETS = [
+    'CAR',
+    'Region I',
+    'Region II',
+    'Region III',
+    'Region IV-A',
+    'Region IV-B',
+    'Region V',
+    'Region VI',
+    'Region VII',
+    'Region VIII',
+    'Region IX',
+    'Region X',
+    'Region XI',
+    'Region XII',
+    'Region XIII',
+  ];
+
+  const REGION_KEYWORDS = [ 
+    { sheet: 'Region I', keywords: ['ILOCOS'] },
+    { sheet: 'Region II', keywords: ['CAGAYAN VALLEY'] },
+    { sheet: 'Region III', keywords: ['CENTRAL LUZON'] },
+    { sheet: 'Region IV-A', keywords: ['CALABARZON'] },
+    { sheet: 'Region IV-B', keywords: ['MIMAROPA'] },
+    { sheet: 'Region V', keywords: ['BICOL'] },
+    { sheet: 'Region VI', keywords: ['WESTERN VISAYAS'] },
+    { sheet: 'Region VII', keywords: ['CENTRAL VISAYAS'] },
+    { sheet: 'Region VIII', keywords: ['EASTERN VISAYAS'] },
+    { sheet: 'Region IX', keywords: ['ZAMBOANGA'] },
+    { sheet: 'Region X', keywords: ['NORTHERN MINDANAO'] },
+    { sheet: 'Region XI', keywords: ['DAVAO'] },
+    { sheet: 'Region XII', keywords: ['SOCCSKSARGEN'] },
+    { sheet: 'Region XIII', keywords: ['CARAGA'] },
+  ];
+
+  const detectRegionSheet = (regionValue) => {
+    const value = String(regionValue || '').toUpperCase();
+    if (!value) return null;
+    if (value.includes('CORDILLERA') || value.includes('CAR')) return 'CAR';
+
+    const match = value.match(/REGION\s*(I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII)(?:\s*[-–]\s*(A|B))?/i);
+    if (match) {
+      const numeral = match[1].toUpperCase();
+      const suffix = match[2] ? match[2].toUpperCase() : null;
+      if (numeral === 'IV' && suffix) return `Region IV-${suffix}`;
+      return `Region ${numeral}`;
+    }
+
+    for (const entry of REGION_KEYWORDS) {
+      if (entry.keywords.some((k) => value.includes(k))) return entry.sheet;
+    }
+
+    return null;
+  };
+
+  const formatMunicipalitiesExport = (mapping) => (
+    mapping.municipality || (Array.isArray(mapping.municipalities) ? mapping.municipalities.join(', ') : '')
+  );
+
+  const formatBarangaysExport = (mapping) => (
+    Array.isArray(mapping.barangays) ? mapping.barangays.join(', ') : (mapping.barangays || '')
+  );
+
+  const applyHeaderStyle = (ws, columnCount) => {
+    const headerStyle = {
+      font: { bold: true },
+      alignment: { horizontal: 'center', vertical: 'center' },
+      fill: { patternType: 'solid', fgColor: { rgb: 'FFE699' } },
+    };
+    for (let c = 0; c < columnCount; c += 1) {
+      const cellAddress = XLSX.utils.encode_cell({ r: 0, c });
+      if (ws[cellAddress]) ws[cellAddress].s = headerStyle;
+    }
+  };
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
@@ -70,52 +151,21 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
     }, 200);
   };
 
-  // Export to Excel function
-  const handleExportExcel = () => {
-    const headers = ['Survey Number', 'Province', 'Municipality', 'Barangays', 'Total Area', 'ICC', 'Remarks', 'Region'];
-    const rows = mappings.map(m => [
-      m.surveyNumber || '',
-      m.province || '',
-      m.municipality || '',
-      m.barangays?.join(', ') || '',
-      m.totalArea || '',
-      m.icc?.join('; ') || '',
-      m.remarks || '',
-      m.region || ''
-    ]);
-
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `mappings-${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    setFabOpen(false);
-  };
-
   const handleUpdateEmail = async (e) => {
     e.preventDefault();
     setEmailError('');
     setEmailSuccess(false);
-    
+
     if (!newEmail || !emailPassword) {
       setEmailError('Please fill in all fields');
       return;
     }
-    
+
     if (!newEmail.includes('@')) {
       setEmailError('Please enter a valid email address');
       return;
     }
-    
+
     setIsUpdatingEmail(true);
     try {
       await updateUserEmail(newEmail, emailPassword);
@@ -189,92 +239,109 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
     }
   };
 
+  const buildExportWorkbook = () => {
+    const headers = ['Survey Number', 'Province', 'Municipality', 'Barangays', 'Total Area', 'ICC', 'Remarks', 'Sheet'];
+    const rowsBySheet = new globalThis.Map();
+
+    mappings.forEach((m) => {
+      const sheet = detectRegionSheet(m.region) || 'Unknown';
+      const rows = rowsBySheet.get(sheet) || [];
+      rows.push([
+        m.surveyNumber || '',
+        m.province || '',
+        formatMunicipalitiesExport(m) || '',
+        formatBarangaysExport(m) || '',
+        m.totalArea || '',
+        m.icc?.join('; ') || '',
+        m.remarks || '',
+        sheet,
+      ]);
+      rowsBySheet.set(sheet, rows);
+    });
+
+    const wb = XLSX.utils.book_new();
+    const orderedSheets = [...REGION_SHEETS, ...(rowsBySheet.has('Unknown') ? ['Unknown'] : [])];
+
+    orderedSheets.forEach((sheetName) => {
+      const rows = rowsBySheet.get(sheetName);
+      if (!rows || rows.length === 0) return;
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+      applyHeaderStyle(ws, headers.length);
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    });
+
+    return wb;
+  };
+
+  const handleOpenExportModal = () => {
+    const defaultName = `mappings-${new Date().toISOString().split('T')[0]}.xlsx`;
+    setExportFileName(defaultName);
+    setExportError('');
+    setShowExportModal(true);
+  };
+
+  const handleCloseExportModal = () => {
+    if (isExporting) return;
+    setIsClosingExportModal(true);
+    setTimeout(() => {
+      setShowExportModal(false);
+      setIsClosingExportModal(false);
+    }, 200);
+  };
+
+  const handleConfirmExport = async () => {
+    const wb = buildExportWorkbook();
+    const safeName = (exportFileName || 'mappings.xlsx').replace(/\s+/g, ' ').trim();
+    const fileName = safeName.endsWith('.xlsx') ? safeName : `${safeName}.xlsx`;
+    setIsExporting(true);
+
+    try {
+      if (typeof window !== 'undefined' && window.showSaveFilePicker) {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: fileName,
+          types: [
+            {
+              description: 'Excel Workbook',
+              accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] },
+            },
+          ],
+        });
+        const writable = await handle.createWritable();
+        const data = XLSX.write(wb, { bookType: 'xlsx', type: 'array', compression: true });
+        await writable.write(data);
+        await writable.close();
+      } else {
+        XLSX.writeFile(wb, fileName, { compression: true });
+      }
+      handleCloseExportModal();
+      setFabOpen(false);
+    } catch (error) {
+      if (error?.name !== 'AbortError') {
+        setExportError(error?.message || 'Failed to export Excel file.');
+      }
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-[#071A2C]/30">
-      {/* Header — enlarged logo, enhanced */}
-      <header className="bg-gradient-to-r from-[#0A2D55] via-[#0C3B6E] to-[#0A2D55] text-white shadow-lg sticky top-0 z-50 border-b border-white/10">
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-3 sm:py-4 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
-            <div className="w-12 h-12 sm:w-14 sm:h-14 md:w-16 md:h-16 bg-white/15 rounded-2xl flex items-center justify-center flex-shrink-0 ring-2 ring-white/25 shadow-xl shadow-black/20 overflow-hidden backdrop-blur-md">
-              <img
-                src="/ncip-logo-removebg-preview.png"
-                alt="NCIP"
-                className="w-12 h-12 sm:w-14 sm:h-14 md:w-16 md:h-16 object-contain drop-shadow-lg"
-              />
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-base sm:text-2xl md:text-[1.6rem] font-bold truncate tracking-tight">ADO Mapping Inventory System</h1>
-              <p className="text-xs sm:text-sm text-white/80 truncate mt-0.5">
-                {user?.role ? (user.role.charAt(0).toUpperCase() + user.role.slice(1)) : 'User'} • {user?.email || user?.username || 'Unknown'}
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={() => setShowLogoutModal(true)}
-            className="flex items-center gap-1.5 sm:gap-2 bg-white/10 hover:bg-white/20 active:scale-95 px-3 sm:px-4 py-2.5 rounded-xl transition font-medium text-xs sm:text-sm flex-shrink-0 ring-1 ring-white/20 backdrop-blur-md"
-          >
-            <LogOut size={18} className="sm:w-5 sm:h-5" />
-            <span className="hidden sm:inline">Logout</span>
-            <span className="sm:hidden">Out</span>
-          </button>
-        </div>
-      </header>
-
-      {/* Welcome Banner — margin + rounded, no logo */}
-      <section className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 mt-4 sm:mt-6">
-        <div className="relative overflow-hidden rounded-2xl border border-white/10 shadow-xl shadow-black/15">
-          <div
-            className="absolute inset-0 rounded-2xl"
-            style={{
-              backgroundImage: `
-                radial-gradient(circle at 20% 20%, rgba(255, 215, 0, 0.18), transparent 34%),
-                radial-gradient(circle at 85% 10%, rgba(255, 215, 0, 0.10), transparent 30%),
-                linear-gradient(135deg, #0A2D55 0%, #0C3B6E 40%, #0A2D55 100%)
-              `,
-            }}
-            aria-hidden
-          />
-          <div
-            className="absolute inset-0 rounded-2xl opacity-[0.08]"
-            style={{ backgroundImage: 'radial-gradient(#d9e4ff 1px, transparent 1px)', backgroundSize: '34px 34px' }}
-            aria-hidden
-          />
-
-          <div className="relative px-4 sm:px-6 lg:px-8 py-5 sm:py-6">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div className="min-w-0">
-                <p className="text-[11px] sm:text-xs text-white/70 font-semibold tracking-wide uppercase">
-                  Profile
-                </p>
-                <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-white leading-tight truncate mt-0.5">
-                  {user?.username || 'User Profile'}
-                </h2>
-                <p className="text-xs sm:text-sm text-white/80 mt-1.5 text-balance max-w-xl">
-                  View and manage your account information
-                </p>
-              </div>
-
-              <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-                <button
-                  onClick={onBack}
-                  className="flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 active:scale-95 px-4 py-2.5 rounded-xl transition font-medium text-sm ring-1 ring-white/20 backdrop-blur-md text-white whitespace-nowrap"
-                >
-                  <ArrowLeft size={18} />
-                  <span className="hidden sm:inline">Back to Dashboard</span>
-                  <span className="sm:hidden">Back</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
+    <div className="min-h-full bg-transparent">
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 mt-4 sm:mt-6 pb-12">
+      <main className="w-full px-3 sm:px-4 pb-6">
         {/* Profile Card */}
-        <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl shadow-black/10 overflow-hidden border border-white/20">
+        <div className="bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col border border-[#0A2D55]/5">
+          <div className="border-b px-6 py-5 bg-gradient-to-r from-[#0A2D55]/5 via-[#F2C94C]/10 to-transparent">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="font-bold text-xl text-[#0A2D55]">Profile Details</h1>
+                <p className="text-sm text-[#0A2D55]/55 mt-1">Account information and security</p>
+              </div>
+            </div>
+          </div>
+
           {/* Profile Information */}
-          <div className="p-6 sm:p-8 space-y-4">
+          <div className="p-6 sm:p-7 space-y-4">
             {/* Email */}
             <div className="flex items-start gap-4 p-5 bg-gradient-to-br from-gray-50 to-white rounded-xl border border-gray-200 hover:border-[#0A2D55]/20 transition-all group">
               <div className="w-12 h-12 bg-[#0A2D55]/10 rounded-xl flex items-center justify-center flex-shrink-0">
@@ -394,7 +461,7 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
             "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[101] w-[90%] max-w-md transition-all duration-200",
             isClosingEmailModal ? "animate-out zoom-out fade-out" : "animate-in zoom-in fade-in"
           )}>
-            <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
+            <div className="relative rounded-2xl border border-white/20 bg-white/10 backdrop-blur-2xl shadow-2xl shadow-black/35 overflow-hidden">
               {/* Header */}
               <div className="bg-gradient-to-r from-[#0A2D55] to-[#0C3B6E] px-6 py-5">
                 <div className="flex items-center gap-3">
@@ -406,9 +473,9 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
               </div>
 
               {/* Form */}
-              <form onSubmit={handleUpdateEmail} className="p-6 space-y-5">
+              <form onSubmit={handleUpdateEmail} className="p-6 space-y-5 text-white/90">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  <label className="block text-sm font-semibold text-white/80 mb-2">
                     New Email Address
                   </label>
                   <input
@@ -416,17 +483,17 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
                     value={newEmail}
                     onChange={(e) => setNewEmail(e.target.value)}
                     disabled={isUpdatingEmail}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#0A2D55] focus:border-transparent transition-all disabled:bg-gray-100 disabled:cursor-not-allowed"
+                    className="w-full px-4 py-3 border border-white/20 rounded-xl bg-white/10 text-white placeholder-white/60 focus:ring-2 focus:ring-[#F2C94C]/40 focus:border-transparent transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                     placeholder="Enter your official email"
                     required
                   />
-                  <p className="text-xs text-gray-500 mt-2">
+                  <p className="text-xs text-white/60 mt-2">
                     Use your official email for password recovery
                   </p>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  <label className="block text-sm font-semibold text-white/80 mb-2">
                     Current Password (for confirmation)
                   </label>
                   <input
@@ -434,40 +501,40 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
                     value={emailPassword}
                     onChange={(e) => setEmailPassword(e.target.value)}
                     disabled={isUpdatingEmail}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#0A2D55] focus:border-transparent transition-all disabled:bg-gray-100 disabled:cursor-not-allowed"
+                    className="w-full px-4 py-3 border border-white/20 rounded-xl bg-white/10 text-white placeholder-white/60 focus:ring-2 focus:ring-[#F2C94C]/40 focus:border-transparent transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                     placeholder="Enter your current password"
                     required
                   />
                 </div>
 
                 {emailError && (
-                  <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
+                  <div className="flex items-center gap-2 p-3 bg-red-500/15 border border-red-500/30 rounded-xl text-red-50 text-sm">
                     <X size={18} />
                     {emailError}
                   </div>
                 )}
 
                 {emailSuccess && (
-                  <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-xl text-green-700 text-sm">
+                  <div className="flex items-center gap-2 p-3 bg-emerald-400/15 border border-emerald-300/30 rounded-xl text-emerald-50 text-sm">
                     <Check size={18} />
                     Email updated successfully!
                   </div>
                 )}
 
                 {/* Actions */}
-                <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200">
+                <div className="flex items-center justify-end gap-3 pt-4 border-t border-white/10">
                   <button
                     type="button"
                     onClick={handleCloseEmailModal}
                     disabled={isUpdatingEmail}
-                    className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-white/5 hover:bg-white/10 text-white/80 hover:text-white transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ring-1 ring-white/10"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={isUpdatingEmail}
-                    className="px-6 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-r from-[#0A2D55] to-[#0C3B6E] text-white hover:shadow-xl transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    className="px-6 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-r from-[#0A2D55] to-[#0C3B6E] text-white hover:shadow-xl hover:shadow-black/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 ring-1 ring-white/20"
                   >
                     {isUpdatingEmail ? (
                       <>
@@ -508,7 +575,7 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
             "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[101] w-[90%] max-w-md transition-all duration-200",
             isClosingPasswordModal ? "animate-out zoom-out fade-out" : "animate-in zoom-in fade-in"
           )}>
-            <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
+            <div className="relative rounded-2xl border border-white/20 bg-white/10 backdrop-blur-2xl shadow-2xl shadow-black/35 overflow-hidden">
               {/* Header */}
               <div className="bg-gradient-to-r from-[#0A2D55] to-[#0C3B6E] px-6 py-5">
                 <div className="flex items-center gap-3">
@@ -520,9 +587,9 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
               </div>
 
               {/* Form */}
-              <form onSubmit={handleUpdatePassword} className="p-6 space-y-5">
+              <form onSubmit={handleUpdatePassword} className="p-6 space-y-5 text-white/90">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  <label className="block text-sm font-semibold text-white/80 mb-2">
                     Current Password
                   </label>
                   <div className="relative">
@@ -531,14 +598,14 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
                       value={currentPassword}
                       onChange={(e) => setCurrentPassword(e.target.value)}
                       disabled={isUpdatingPassword}
-                      className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#0A2D55] focus:border-transparent transition-all disabled:bg-gray-100 disabled:cursor-not-allowed"
+                      className="w-full px-4 py-3 pr-12 border border-white/20 rounded-xl bg-white/10 text-white placeholder-white/60 focus:ring-2 focus:ring-[#F2C94C]/40 focus:border-transparent transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                       placeholder="Enter current password"
                       required
                     />
                     <button
                       type="button"
                       onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-white/70 hover:text-white"
                     >
                       {showCurrentPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                     </button>
@@ -546,7 +613,7 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  <label className="block text-sm font-semibold text-white/80 mb-2">
                     New Password
                   </label>
                   <div className="relative">
@@ -555,14 +622,14 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                       disabled={isUpdatingPassword}
-                      className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#0A2D55] focus:border-transparent transition-all disabled:bg-gray-100 disabled:cursor-not-allowed"
+                      className="w-full px-4 py-3 pr-12 border border-white/20 rounded-xl bg-white/10 text-white placeholder-white/60 focus:ring-2 focus:ring-[#F2C94C]/40 focus:border-transparent transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                       placeholder="Enter new password (min 6 chars)"
                       required
                     />
                     <button
                       type="button"
                       onClick={() => setShowNewPassword(!showNewPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-white/70 hover:text-white"
                     >
                       {showNewPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                     </button>
@@ -570,7 +637,7 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  <label className="block text-sm font-semibold text-white/80 mb-2">
                     Confirm New Password
                   </label>
                   <div className="relative">
@@ -579,14 +646,14 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       disabled={isUpdatingPassword}
-                      className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#0A2D55] focus:border-transparent transition-all disabled:bg-gray-100 disabled:cursor-not-allowed"
+                      className="w-full px-4 py-3 pr-12 border border-white/20 rounded-xl bg-white/10 text-white placeholder-white/60 focus:ring-2 focus:ring-[#F2C94C]/40 focus:border-transparent transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                       placeholder="Re-enter new password"
                       required
                     />
                     <button
                       type="button"
                       onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-white/70 hover:text-white"
                     >
                       {showConfirmPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                     </button>
@@ -594,33 +661,33 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
                 </div>
 
                 {passwordError && (
-                  <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
+                  <div className="flex items-center gap-2 p-3 bg-red-500/15 border border-red-500/30 rounded-xl text-red-50 text-sm">
                     <X size={18} />
                     {passwordError}
                   </div>
                 )}
 
                 {passwordSuccess && (
-                  <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-xl text-green-700 text-sm">
+                  <div className="flex items-center gap-2 p-3 bg-emerald-400/15 border border-emerald-300/30 rounded-xl text-emerald-50 text-sm">
                     <Check size={18} />
                     Password changed successfully!
                   </div>
                 )}
 
                 {/* Actions */}
-                <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200">
+                <div className="flex items-center justify-end gap-3 pt-4 border-t border-white/10">
                   <button
                     type="button"
                     onClick={handleClosePasswordModal}
                     disabled={isUpdatingPassword}
-                    className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-white/5 hover:bg-white/10 text-white/80 hover:text-white transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ring-1 ring-white/10"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={isUpdatingPassword}
-                    className="px-6 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-r from-[#0A2D55] to-[#0C3B6E] text-white hover:shadow-xl transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    className="px-6 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-r from-[#0A2D55] to-[#0C3B6E] text-white hover:shadow-xl hover:shadow-black/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 ring-1 ring-white/20"
                   >
                     {isUpdatingPassword ? (
                       <>
@@ -762,7 +829,7 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
 
         {/* Export Excel Button - Top Left (YELLOW) */}
         <button
-          onClick={handleExportExcel}
+          onClick={handleOpenExportModal}
           className={cn(
             "absolute w-14 h-14 bg-[#F2C94C] hover:bg-yellow-400 text-[#0A2D55] rounded-full shadow-lg hover:shadow-xl transition-all duration-300 ease-out active:scale-95 flex items-center justify-center",
             fabOpen
@@ -794,6 +861,98 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
           className="fixed inset-0 z-40"
           onClick={() => setFabOpen(false)}
         />
+      )}
+
+      {/* Export Confirmation Modal */}
+      {showExportModal && (
+        <>
+          <div
+            className={cn(
+              "fixed inset-0 z-[100] transition-all duration-200",
+              isClosingExportModal ? "animate-out fade-out" : "animate-in fade-in"
+            )}
+            style={{
+              backgroundImage: `
+                radial-gradient(circle at 20% 20%, rgba(255, 215, 0, 0.08), transparent 30%),
+                radial-gradient(circle at 80% 80%, rgba(255, 215, 0, 0.05), transparent 28%),
+                linear-gradient(135deg, rgba(10, 45, 85, 0.7) 0%, rgba(12, 59, 110, 0.8) 100%)
+              `,
+              backdropFilter: 'blur(12px)',
+            }}
+            onClick={handleCloseExportModal}
+          />
+
+          <div className={cn(
+            "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[101] w-[90%] max-w-md transition-all duration-200",
+            isClosingExportModal ? "animate-out zoom-out fade-out" : "animate-in zoom-in fade-in"
+          )}>
+            <div className="relative rounded-2xl border border-white/20 bg-white/10 backdrop-blur-2xl shadow-2xl shadow-black/35 overflow-hidden">
+              {isExporting && (
+                <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#071A2C]/20 backdrop-blur-md">
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="rounded-full border border-white/20 bg-white/10 backdrop-blur-xl shadow-xl shadow-black/30 p-4">
+                      <div className="h-12 w-12 rounded-full border-2 border-white/25 border-t-[#F2C94C] animate-spin" />
+                    </div>
+                    <p className="text-sm font-medium text-white/90">Exporting...</p>
+                  </div>
+                </div>
+              )}
+
+              <div
+                className="px-6 py-5"
+                style={{
+                  backgroundImage: 'linear-gradient(135deg, #0A2D55 0%, #0C3B6E 40%, #0A2D55 100%)',
+                }}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-white/15 rounded-2xl flex items-center justify-center ring-2 ring-white/25 shadow-xl">
+                    <Download size={22} className="text-white" />
+                  </div>
+                  <h3 className="text-xl font-bold text-white tracking-tight">Export Excel</h3>
+                </div>
+              </div>
+
+              <div className="px-6 py-5 text-white/90">
+                <p className="text-sm">Choose a file name and location to save the Excel workbook.</p>
+                <div className="mt-4">
+                  <label className="block text-xs font-semibold text-white/70 mb-2">File name</label>
+                  <input
+                    value={exportFileName}
+                    onChange={(e) => setExportFileName(e.target.value)}
+                    disabled={isExporting}
+                    className="w-full px-4 py-2.5 rounded-xl border border-white/20 bg-white/10 text-white placeholder-white/60 focus:ring-2 focus:ring-[#F2C94C]/40 focus:border-transparent transition"
+                    placeholder="mappings.xlsx"
+                  />
+                </div>
+                {exportError && (
+                  <div className="mt-4 flex items-center gap-2 p-3 bg-red-500/15 border border-red-500/30 rounded-xl text-red-50 text-sm">
+                    <X size={18} />
+                    {exportError}
+                  </div>
+                )}
+              </div>
+
+              <div className="px-6 py-4 border-t border-white/15 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={handleCloseExportModal}
+                  disabled={isExporting}
+                  className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-white/5 hover:bg-white/10 text-white/80 hover:text-white transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ring-1 ring-white/10"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmExport}
+                  disabled={isExporting}
+                  className="px-6 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-r from-[#0A2D55] to-[#0C3B6E] text-white hover:shadow-xl hover:shadow-black/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ring-1 ring-white/20"
+                >
+                  Save Excel
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

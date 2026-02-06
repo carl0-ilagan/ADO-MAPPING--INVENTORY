@@ -7,98 +7,21 @@ import { MappingForm } from '@/components/MappingFormClean';
 import { RightSplitModal } from '@/components/RightSplitModal';
 import { ProfilePage } from '@/components/ProfilePage';
 import { onAuthStateChangeListener, signOutUser } from '@/lib/firebaseAuth.js';
-import { getUserMappings, addMapping, deleteMapping } from '@/lib/firebaseDB.js';
+import { getUserMappings, addMapping, deleteMapping, updateMapping } from '@/lib/firebaseDB.js';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase.js';
 
-// Sample data based on the spreadsheet
-const SAMPLE_MAPPINGS = [
-  {
-    id: 'sample-1',
-    surveyNumber: 'ADs-0301-0027-Gni',
-    location: 'Barangay/s of: DITEKI, DITUMABO, NONONG SENIOR, L. PIMENTEL, DIBALO, DIBAYABAY, DIBUT, DIKAPINISAN\nMunicipality/ies of: SAN LUIS\nProvince/s of: AURORA',
-    totalArea: 42697.1993,
-    icc: ['ALTA/DUMAGAT'],
-    remarks: '',
-    region: 'Region III - Central Luzon',
-    province: 'Aurora',
-    municipality: 'San Luis',
-    barangays: ['Diteki', 'Ditumabo', 'Nonong Senior', 'L. Pimentel', 'Dibalo', 'Dibayabay', 'Dibut', 'Dikapinisan'],
-    isSample: true,
-  },
-  {
-    id: 'sample-2',
-    surveyNumber: 'ADs-0302-0026-Gni',
-    location: 'Barangay/s of: TUBO-TUBO, PAYANGAN AND BAYAN-BAYANAN\nMunicipality/ies of: DINALUPIHAN\nProvince/s of: BATAAN',
-    totalArea: 5167.0486,
-    icc: ['AYTA AMBALA'],
-    remarks: '',
-    region: 'Region III - Central Luzon',
-    province: 'Bataan',
-    municipality: 'Dinalupihan',
-    barangays: ['Tubo-Tubo', 'Payangan', 'Bayan-Bayanan'],
-    isSample: true,
-  },
-  {
-    id: 'sample-3',
-    surveyNumber: 'ADs-0302-0020-Gni',
-    location: 'Barangay/s of: BINARITAN, NAGBALAYONG, & SABANG\nMunicipality/ies of: MORONG\nProvince/s of: BATAAN',
-    totalArea: 12231.1026,
-    icc: ['MAGBUKON AYTA'],
-    remarks: 'void',
-    region: 'Region III - Central Luzon',
-    province: 'Bataan',
-    municipality: 'Morong',
-    barangays: ['Binaritan', 'Nagbalayong', 'Sabang'],
-    isSample: true,
-  },
-  {
-    id: 'sample-4',
-    surveyNumber: 'ADs-0302-0025-Gni',
-    location: 'Barangay/s of: BANAWANG, A. RICARDO, BINUKAWAN TANATO, DANGCOL, MUNTING BATANGAS SALIAN, GAYINTIN\nMunicipality/ies of: BAGAC, BALANGA, ABUCAY, SAMAL ORANI\nProvince/s of: BATAAN',
-    totalArea: 14977.1478,
-    icc: ['AYTA MAGBUKUN'],
-    remarks: '3 COPIES',
-    region: 'Region III - Central Luzon',
-    province: 'Bataan',
-    municipality: 'Bagac, Balanga, Abucay, Samal Orani',
-    barangays: ['Banawang', 'A. Ricardo', 'Binukawan Tanato', 'Dangcol', 'Munting Batangas Salian', 'Gayintin'],
-    isSample: true,
-  },
-  {
-    id: 'sample-5',
-    surveyNumber: 'ADs-0304-0022-Gni',
-    location: 'Barangay/s of: CALABASA AND LIGAYA\nMunicipality/ies of: GABALDON\nProvince/s of: NUEVA ECIJA',
-    totalArea: 4987.4402,
-    icc: ['DUMAGAT'],
-    remarks: '',
-    region: 'Region III - Central Luzon',
-    province: 'Nueva Ecija',
-    municipality: 'Gabaldon',
-    barangays: ['Calabasa', 'Ligaya'],
-    isSample: true,
-  },
-  {
-    id: 'sample-6',
-    surveyNumber: 'ADs-0303-0021-Gni',
-    location: 'Barangay/s of: BINAGBAG, MARUNGKO, SULUCAN, SAN ROQUE, STO CRISTO, STA LUCIA, BAYBAY, BANABAN\nMunicipality/ies of: Multiple\nProvince/s of: CAR',
-    totalArea: 81564.8247,
-    icc: ['DUMAGAT'],
-    remarks: 'D:REGIONAL DIRECTOR ATTY. ROLAND P. CALDERON',
-    region: 'CAR - Cordillera Administrative Region',
-    province: 'Multiple Provinces',
-    municipality: 'Multiple Municipalities',
-    barangays: ['Binagbag', 'Marungko', 'Sulucan', 'San Roque', 'Sto Cristo', 'Sta Lucia', 'Baybay', 'Banaban'],
-    isSample: true,
-  },
-];
 
 export function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [currentView, setCurrentView] = useState('login'); // 'login', 'dashboard', 'search'
-  const [mappings, setMappings] = useState(SAMPLE_MAPPINGS); // Initialize with sample data
+  const [mappings, setMappings] = useState([]);
   const [showAddMappingModal, setShowAddMappingModal] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const [isLoadingMappings, setIsLoadingMappings] = useState(false);
+  const [editingMapping, setEditingMapping] = useState(null);
+  const [toast, setToast] = useState(null);
+  const [toastTick, setToastTick] = useState(0);
 
   // Monitor auth state changes
   useEffect(() => {
@@ -118,17 +41,15 @@ export function App() {
         setIsLoadingMappings(true);
         try {
           const userMappings = await getUserMappings(user.uid);
-          // Combine sample data with user's actual data
-          setMappings([...SAMPLE_MAPPINGS, ...userMappings]);
+          setMappings(userMappings);
         } catch (error) {
           console.error('Error loading mappings:', error);
-          // Keep sample data even if loading fails
-          setMappings(SAMPLE_MAPPINGS);
+          setMappings([]);
         }
         setIsLoadingMappings(false);
       } else {
         setCurrentUser(null);
-        setMappings(SAMPLE_MAPPINGS); // Keep sample data visible even when logged out
+        setMappings([]);
       }
     });
 
@@ -145,13 +66,19 @@ export function App() {
       await signOutUser();
       setCurrentUser(null);
       setCurrentView('login');
-      setMappings(SAMPLE_MAPPINGS); // Keep sample data visible after logout
+      setMappings([]);
     } catch (error) {
       console.error('Error logging out:', error);
     }
   };
 
   const handleAddMapping = () => {
+    setEditingMapping(null);
+    setShowAddMappingModal(true);
+  };
+
+  const handleEditMapping = (mapping) => {
+    setEditingMapping(mapping);
     setShowAddMappingModal(true);
   };
 
@@ -159,30 +86,46 @@ export function App() {
     if (!currentUser) return;
 
     try {
+      const municipalities = formData.municipalities || [];
+      const barangays = formData.barangays || [];
       const newMapping = {
         userId: currentUser.uid,
         surveyNumber: formData.surveyNumber || '',
         region: formData.region || '',
         province: formData.province || '',
-        municipality: (formData.municipalities || []).join(', '),
-        barangays: formData.barangays || [],
+        municipality: municipalities.join(', '),
+        municipalities,
+        barangays,
         icc: formData.icc || [],
         remarks: formData.remarks || '',
         totalArea: formData.totalArea || 0,
       };
 
-      const mappingId = await addMapping({
-        ...newMapping,
-        location: '',
-      });
-      
-      // Update local state
-      const updatedMappings = [...mappings, { id: mappingId, ...newMapping }];
-      setMappings(updatedMappings);
+      if (editingMapping?.id) {
+        await updateMapping(editingMapping.id, {
+          ...newMapping,
+          location: '',
+        });
+        setMappings(mappings.map((m) => (m.id === editingMapping.id ? { ...m, ...newMapping } : m)));
+      } else {
+        const mappingId = await addMapping({
+          ...newMapping,
+          location: '',
+        });
 
+        // Update local state
+        const updatedMappings = [...mappings, { id: mappingId, ...newMapping }];
+        setMappings(updatedMappings);
+      }
+      setToastTick((t) => t + 1);
+      setToast({ type: 'success', message: editingMapping ? 'Mapping updated successfully.' : 'Mapping saved successfully.' });
       setShowAddMappingModal(false);
+      setEditingMapping(null);
     } catch (error) {
       console.error('Error adding mapping:', error);
+      setToastTick((t) => t + 1);
+      setToast({ type: 'error', message: error?.message || 'Failed to save mapping.' });
+      throw error;
     }
   };
 
@@ -200,7 +143,7 @@ export function App() {
   };
 
   const handleViewProfile = () => {
-    setCurrentView('profile');
+    setShowProfileModal(true);
   };
 
   // View Components
@@ -216,52 +159,50 @@ export function App() {
         onAddMapping={handleAddMapping}
         onViewMappings={handleViewMappings}
         onViewProfile={handleViewProfile}
+        onEditMapping={handleEditMapping}
         onDeleteMapping={handleDeleteMapping}
+        externalAlert={toast}
+        externalAlertTick={toastTick}
+        onClearExternalAlert={() => setToast(null)}
         mappings={mappings}
         isLoadingMappings={isLoadingMappings}
       />
       <RightSplitModal
         open={showAddMappingModal}
-        onOpenChange={setShowAddMappingModal}
-        title="Add New Mapping"
+        onOpenChange={(open) => {
+          setShowAddMappingModal(open);
+          if (!open) setEditingMapping(null);
+        }}
+        title={editingMapping ? "Edit Mapping" : "Add New Mapping"}
         dismissOnSecondaryClick={true}
         primaryChildren={
           <MappingForm
             isModal
             onBack={() => setShowAddMappingModal(false)}
             onSubmit={handleFormSubmit}
+            initialData={editingMapping}
+            formTitle={editingMapping ? "Edit Mapping" : "Add New Mapping"}
+            submitLabel={editingMapping ? "Update Mapping" : "Save Mapping"}
+          />
+        }
+      />
+      <RightSplitModal
+        open={showProfileModal}
+        onOpenChange={setShowProfileModal}
+        title="Profile"
+        dismissOnSecondaryClick={true}
+        primaryChildren={
+          <ProfilePage
+            user={currentUser}
+            onBack={() => setShowProfileModal(false)}
+            onLogout={handleLogout}
+            onAddMapping={handleAddMapping}
+            mappings={mappings}
           />
         }
       />
     </>
   );
-
-  if (currentView === 'profile') {
-    return (
-      <>
-        <ProfilePage
-          user={currentUser}
-          onBack={() => setCurrentView('dashboard')}
-          onLogout={handleLogout}
-          onAddMapping={handleAddMapping}
-          mappings={mappings}
-        />
-        <RightSplitModal
-          open={showAddMappingModal}
-          onOpenChange={setShowAddMappingModal}
-          title="Add New Mapping"
-          dismissOnSecondaryClick={true}
-          primaryChildren={
-            <MappingForm
-              isModal
-              onBack={() => setShowAddMappingModal(false)}
-              onSubmit={handleFormSubmit}
-            />
-          }
-        />
-      </>
-    );
-  }
 
   if (currentView === 'search') {
     return dashboardWithModal;
