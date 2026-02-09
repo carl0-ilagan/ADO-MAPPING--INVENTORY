@@ -35,6 +35,9 @@ export function Dashboard({
   onClearExternalAlert = () => {},
   mappings = [],
   onImportMappings = () => {},
+  availableCollections = [{ id: 'mappings', collectionName: 'mappings' }],
+  selectedCollection = 'mappings',
+  onSelectCollection = () => {},
 }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -61,6 +64,12 @@ export function Dashboard({
   const [alertTick, setAlertTick] = useState(0);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
+  const [showImportChoiceModal, setShowImportChoiceModal] = useState(false);
+  const [importPreviewRecords, setImportPreviewRecords] = useState([]);
+  const [importInvalidSheets, setImportInvalidSheets] = useState([]);
+  const [importRawSheets, setImportRawSheets] = useState([]);
+  const [importCollectionName, setImportCollectionName] = useState('');
+  const [showInvalidDetails, setShowInvalidDetails] = useState(false);
   const fileInputRef = useRef(null);
   const itemsPerPage = 15;
 
@@ -257,6 +266,13 @@ export function Dashboard({
       .toLowerCase()
   );
 
+  const sanitizeFieldName = (s) => (
+    String(s || '')
+      .trim()
+      .replace(/\s+/g, '_')
+      .replace(/[^A-Za-z0-9_]/g, '_')
+  );
+
   const compactHeader = (value) => normalizeHeader(value).replace(/[^a-z0-9]/g, '');
 
   const splitListValue = (value) => {
@@ -312,6 +328,7 @@ export function Dashboard({
     const file = event.target.files?.[0];
     if (!file) return;
 
+    let parsedRecordsCount = 0;
     try {
       setIsImporting(true);
       setImportProgress(5);
@@ -377,9 +394,19 @@ export function Dashboard({
 
       const buildRecordsFromRows = (rows, sheetName) => {
         const headerRowIndex = findHeaderRowIndex(rows);
-        if (headerRowIndex === -1) return { records: [], error: 'no-header', sheetName };
+        if (headerRowIndex === -1) return { records: [], rawRecords: [], error: 'no-header', sheetName };
 
         const headerRow = rows[headerRowIndex].map(normalizeHeader);
+        const headerRowOriginal = rows[headerRowIndex].map((h) => String(h || '').trim());
+        // build rawRecords: each physical row becomes an object mapping sanitized header -> cell value
+        const rawRecords = rows.slice(headerRowIndex + 1).map((row) => {
+          const obj = {};
+          for (let i = 0; i < headerRowOriginal.length; i += 1) {
+            const key = sanitizeFieldName(headerRowOriginal[i] || `col_${i}`);
+            obj[key] = row[i] !== undefined && row[i] !== null ? String(row[i]).trim() : '';
+          }
+          return obj;
+        });
         const colIndex = (candidates) => headerRow.findIndex((h) => {
           const compact = compactHeader(h);
           return candidates.some((c) => {
@@ -447,11 +474,11 @@ export function Dashboard({
         }
 
         if (!hasLocationFormat && [surveyIdx, provinceIdx, municipalityIdx, barangayIdx, areaIdx, iccIdx, remarksIdx].some((idx) => idx === -1)) {
-          return { records: [], error: 'invalid-headers', sheetName, found: rows[headerRowIndex] };
+          return { records: [], rawRecords, error: 'invalid-headers', sheetName, found: rows[headerRowIndex] };
         }
 
         if (hasLocationFormat && [surveyIdx, locationIdx, areaIdx, iccIdx, remarksIdx].some((idx) => idx === -1)) {
-          return { records: [], error: 'invalid-headers', sheetName, found: rows[headerRowIndex] };
+          return { records: [], rawRecords, error: 'invalid-headers', sheetName, found: rows[headerRowIndex] };
         }
 
         const records = [];
@@ -554,7 +581,7 @@ export function Dashboard({
           });
         }
 
-        return { records, error: null, sheetName };
+        return { records, rawRecords, error: null, sheetName };
       };
 
       const allRecords = [];
@@ -568,44 +595,99 @@ export function Dashboard({
 
       const totalSheets = dataSheets.length || 1;
 
+      const rawSheets = [];
       dataSheets.forEach((sheetName, index) => {
         const ws = wb.Sheets[sheetName];
         if (!ws) return;
         const wsRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
 
-        const { records, error } = buildRecordsFromRows(wsRows, sheetName);
+        const { records, error, rawRecords } = buildRecordsFromRows(wsRows, sheetName);
         if (error) {
           invalidSheets.push(sheetName);
         } else {
           allRecords.push(...records);
+          if (rawRecords && rawRecords.length) rawSheets.push({ sheetName, rawRecords });
         }
 
         const progress = 10 + Math.round(((index + 1) / totalSheets) * 70);
         setImportProgress(progress);
       });
 
-      if (allRecords.length === 0) {
+      parsedRecordsCount = allRecords.length;
+      if (parsedRecordsCount === 0) {
         const sheetNote = invalidSheets.length > 0 ? ` Sheets without headers: ${invalidSheets.join(', ')}.` : '';
         setAlertTick((t) => t + 1);
         setAlert({ type: 'error', message: `No valid rows found to import.${sheetNote}` });
         return;
       }
 
-      setImportProgress(90);
-      await onImportMappings(allRecords);
       setImportProgress(100);
-      setAlertTick((t) => t + 1);
-      setAlert({ type: 'success', message: `Import successful. ${allRecords.length} records added.` });
+      // parsing finished — show completed progress and hide parsing indicator
+      setIsImporting(false);
+      // Instead of importing immediately, ask the user whether to add or create new
+      setImportPreviewRecords(allRecords);
+      setImportInvalidSheets(invalidSheets);
+      setImportRawSheets(rawSheets);
+      // suggest a default collection name
+      try {
+        const uid = user?.uid || 'anon';
+        const safeTs = new Date().toISOString().replace(/[:.]/g, '-');
+        setImportCollectionName(`mappings_import_${uid}_${safeTs}`);
+      } catch (e) {
+        setImportCollectionName('mappings_import');
+      }
+      setShowImportChoiceModal(true);
     } catch (error) {
       console.error('Import failed:', error);
       setAlertTick((t) => t + 1);
       setAlert({ type: 'error', message: error?.message || 'Failed to import Excel file.' });
     } finally {
       setTimeout(() => {
+        // keep isImporting true while waiting for user decision; only reset UI if parse failed
+        if (parsedRecordsCount === 0) {
+          setIsImporting(false);
+          setImportProgress(0);
+        }
+      }, 600);
+      event.target.value = '';
+    }
+  };
+
+  const handleConfirmImport = async (mode = 'add', collectionName = '') => {
+    // mode: 'add' -> merge into existing; 'replace' -> create new set (replace existing)
+    if (!importPreviewRecords || importPreviewRecords.length === 0) {
+      setShowImportChoiceModal(false);
+      setIsImporting(false);
+      setImportProgress(0);
+      return;
+    }
+
+    try {
+      // Start actual import phase
+      setIsImporting(true);
+      setImportProgress(1);
+      const options = { mode, onProgress: (p) => setImportProgress(p) };
+      if (mode === 'newCollection') {
+        options.collectionName = collectionName || importCollectionName;
+        // When creating a new collection, include the raw sheet rows so the
+        // created collection uses the original Excel headers as document fields.
+        options.rawImport = importRawSheets;
+      }
+      await onImportMappings(importPreviewRecords, options);
+      const modeMsg = mode === 'add' ? 'added' : mode === 'replace' ? 'replaced' : (mode === 'newCollection' ? 'imported into new collection' : 'processed');
+      setAlertTick((t) => t + 1);
+      setAlert({ type: 'success', message: `Import successful. ${importPreviewRecords.length} records ${modeMsg}.` });
+    } catch (err) {
+      setAlertTick((t) => t + 1);
+      setAlert({ type: 'error', message: err?.message || 'Failed to import Excel file.' });
+    } finally {
+      setShowImportChoiceModal(false);
+      setImportPreviewRecords([]);
+      setImportInvalidSheets([]);
+      setTimeout(() => {
         setIsImporting(false);
         setImportProgress(0);
       }, 600);
-      event.target.value = '';
     }
   };
 
@@ -782,6 +864,123 @@ export function Dashboard({
           </div>
         </div>
       )}
+      {/* Import Choice Modal */}
+      {showImportChoiceModal && (
+        <>
+          <div
+            className={cn(
+              "fixed inset-0 z-[100] transition-all duration-200",
+              isImporting ? "" : "animate-in fade-in"
+            )}
+            style={{ backdropFilter: 'blur(8px)', backgroundColor: 'rgba(3,6,23,0.45)' }}
+            onClick={() => {
+              // don't close by clicking backdrop to avoid accidental dismissal
+            }}
+          />
+
+          <div className={cn(
+            "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[101] w-[92vw] max-w-md transition-all duration-200",
+            "animate-in zoom-in fade-in"
+          )}>
+            <div className="relative rounded-2xl border border-white/20 bg-white/10 backdrop-blur-2xl shadow-2xl shadow-black/35 max-h-[84vh] overflow-hidden">
+              <div className="px-4 sm:px-6 py-4 sm:py-5" style={{ backgroundImage: 'linear-gradient(135deg, #0A2D55 0%, #0C3B6E 40%, #0A2D55 100%)' }}>
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-white/15 rounded-2xl flex items-center justify-center ring-2 ring-white/25 shadow-xl">
+                    <Upload size={22} className="text-white" />
+                  </div>
+                  <h3 className="text-xl font-bold text-white tracking-tight">Import Excel</h3>
+                </div>
+              </div>
+
+              <div className="px-4 sm:px-6 py-4 sm:py-5 text-white/90 overflow-y-auto">
+                <p className="text-sm mb-2">Found <strong>{importPreviewRecords.length}</strong> record(s) across the uploaded sheets.</p>
+                {importInvalidSheets.length > 0 && (
+                  <div className="mb-2">
+                    <div className="flex items-center justify-between text-xs text-yellow-200">
+                      <div>Sheets with unrecognized format: <strong>{importInvalidSheets.length}</strong></div>
+                      <button
+                        type="button"
+                        onClick={() => setShowInvalidDetails((s) => !s)}
+                        className="text-white/70 underline text-[0.7rem]"
+                      >
+                        {showInvalidDetails ? 'Hide details' : 'Show details'}
+                      </button>
+                    </div>
+                    {showInvalidDetails && (
+                      <div className="mt-2 text-[0.75rem] text-yellow-200 leading-snug max-h-28 overflow-auto border border-yellow-200/10 rounded-md p-2 bg-white/2">
+                        {importInvalidSheets.join(', ')}
+                      </div>
+                    )}
+                  </div>
+                )}
+                <p className="text-sm mb-2">Do you want to <strong>add</strong> these records into the existing database or <strong>create a new set</strong>?</p>
+                <p className="text-xs text-white/70 mb-2">If your Excel file has a different format, choose Create new and review results first.</p>
+              </div>
+
+              <div className="px-4 sm:px-6 py-3 border-t border-white/15 flex flex-col items-stretch gap-3 bg-white/5">
+                <div className="flex gap-3 w-full">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowImportChoiceModal(false);
+                      setImportPreviewRecords([]);
+                      setImportInvalidSheets([]);
+                      setIsImporting(false);
+                      setImportProgress(0);
+                      fileInputRef.current && (fileInputRef.current.value = '');
+                    }}
+                    className="flex-1 px-4 py-2 rounded-lg border border-white/20 text-white/90 hover:bg-white/10 transition"
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleConfirmImport('add')}
+                    className="flex-1 px-4 py-2 rounded-lg bg-[#0A2D55] text-white hover:bg-[#0C3B6E] transition"
+                  >
+                    Add to Existing
+                  </button>
+                </div>
+
+                {mappings.length > 0 ? (
+                  <div className="w-full">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={importCollectionName}
+                        onChange={(e) => setImportCollectionName(e.target.value)}
+                        className="flex-1 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white/90 placeholder-white/50"
+                        placeholder="mappings_import_<uid>_2026-02-09T..."
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const valid = /^[A-Za-z0-9_-]+$/.test(importCollectionName.replace(/^mappings_import_/, '')) || /^[A-Za-z0-9_-]+$/.test(importCollectionName);
+                          if (!importCollectionName || !valid) {
+                            setAlertTick((t) => t + 1);
+                            setAlert({ type: 'error', message: 'Please enter a valid collection name (letters, numbers, hyphens, underscores).' });
+                            return;
+                          }
+                          handleConfirmImport('newCollection', importCollectionName);
+                        }}
+                        className="px-4 py-2 rounded-lg bg-red-500 text-white hover:bg-red-600 transition"
+                      >
+                        Create
+                      </button>
+                    </div>
+                    <p className="text-xs text-white/70 mt-2">Collection names may contain letters, numbers, hyphens and underscores only.</p>
+                  </div>
+                ) : (
+                  <div className="w-full">
+                    <p className="text-sm text-white/80">No existing mappings found — only adding is available.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
       {isImporting && (
         <div className="fixed z-[119] right-4 top-[88px] w-[min(92vw,360px)] sm:w-96">
           <div className="rounded-xl border border-white/20 bg-white/10 backdrop-blur-xl p-3 shadow-2xl shadow-black/30">
@@ -818,11 +1017,11 @@ export function Dashboard({
           </div>
           <button
             onClick={() => setShowLogoutModal(true)}
+            aria-label="Logout"
             className="flex items-center gap-1.5 sm:gap-2 bg-white/10 hover:bg-white/20 active:scale-95 px-3 sm:px-4 py-2.5 rounded-xl transition font-medium text-xs sm:text-sm flex-shrink-0 ring-1 ring-white/20 backdrop-blur-md"
           >
             <LogOut size={18} className="sm:w-5 sm:h-5" />
             <span className="hidden sm:inline">Logout</span>
-            <span className="sm:hidden">Out</span>
           </button>
         </div>
       </header>
@@ -862,6 +1061,24 @@ export function Dashboard({
               </div>
 
               <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+                {Array.isArray(availableCollections) && availableCollections.length > 1 ? (
+                  <div className="flex items-center gap-2 mr-2">
+                        <label className="sr-only">Collection</label>
+                        <Select
+                          value={selectedCollection}
+                          onValueChange={(value) => onSelectCollection(value)}
+                        >
+                          <SelectTrigger className="w-[220px] bg-white/5 text-white/90 text-sm rounded-lg px-3 py-2 border border-white/10">
+                            <SelectValue placeholder="Select collection" />
+                          </SelectTrigger>
+                          <SelectContent className="bg-white border-[#0A2D55]/10 rounded-xl shadow-2xl">
+                            {availableCollections.filter((c) => c && c.collectionName).map((c) => (
+                              <SelectItem key={c.id} value={c.collectionName}>{c.displayName || c.collectionName}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                  </div>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
@@ -1247,7 +1464,7 @@ export function Dashboard({
       </main>
 
       {/* Floating Action Button with Menu */}
-      <div className="fixed bottom-8 right-8 z-50">
+      <div className="fixed right-8 z-50 bottom-20 sm:bottom-8" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
         {/* Profile Button - Top */}
         <button
           onClick={() => {
@@ -1338,10 +1555,10 @@ export function Dashboard({
           />
 
           <div className={cn(
-            "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[101] w-[90%] max-w-md transition-all duration-200",
+            "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[101] w-[92vw] max-w-[420px] sm:w-[90%] transition-all duration-200",
             isClosingExportModal ? "animate-out zoom-out fade-out" : "animate-in zoom-in fade-in"
           )}>
-            <div className="relative rounded-2xl border border-white/20 bg-white/10 backdrop-blur-2xl shadow-2xl shadow-black/35 overflow-hidden">
+            <div className="relative rounded-2xl border border-white/20 bg-white/10 backdrop-blur-2xl shadow-2xl shadow-black/35 max-h-[90vh] overflow-y-auto">
               {isExporting && (
                 <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#071A2C]/20 backdrop-blur-md">
                   <div className="flex flex-col items-center gap-3">
@@ -1354,7 +1571,7 @@ export function Dashboard({
               )}
 
               <div
-                className="px-6 py-5"
+                className="px-4 sm:px-6 py-4 sm:py-5"
                 style={{
                   backgroundImage: 'linear-gradient(135deg, #0A2D55 0%, #0C3B6E 40%, #0A2D55 100%)',
                 }}
@@ -1367,7 +1584,7 @@ export function Dashboard({
                 </div>
               </div>
 
-              <div className="px-6 py-5 text-white/90">
+              <div className="px-4 sm:px-6 py-4 sm:py-5 text-white/90">
                 <p className="text-sm">Choose a file name and location to save the Excel workbook.</p>
                 <div className="mt-4">
                   <label className="block text-xs font-semibold text-white/70 mb-2">File name</label>
@@ -1381,7 +1598,7 @@ export function Dashboard({
                 </div>
               </div>
 
-              <div className="px-6 py-4 border-t border-white/15 flex items-center justify-end gap-3">
+              <div className="px-4 sm:px-6 py-4 border-t border-white/15 flex items-center justify-end gap-3">
                 <button
                   type="button"
                   onClick={handleCloseExportModal}
@@ -1424,10 +1641,10 @@ export function Dashboard({
           />
 
           <div className={cn(
-            "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[101] w-[90%] max-w-md transition-all duration-200",
+            "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[101] w-[92vw] max-w-[420px] sm:w-[90%] transition-all duration-200",
             isClosingDeleteModal ? "animate-out zoom-out fade-out" : "animate-in zoom-in fade-in"
           )}>
-            <div className="relative rounded-2xl border border-white/20 bg-white/10 backdrop-blur-2xl shadow-2xl shadow-black/35 overflow-hidden">
+            <div className="relative rounded-2xl border border-white/20 bg-white/10 backdrop-blur-2xl shadow-2xl shadow-black/35 max-h-[90vh] overflow-y-auto">
               {isDeleting && (
                 <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#071A2C]/20 backdrop-blur-md">
                   <div className="flex flex-col items-center gap-3">
@@ -1440,7 +1657,7 @@ export function Dashboard({
               )}
 
               <div
-                className="px-6 py-5"
+                className="px-4 sm:px-6 py-4 sm:py-5"
                 style={{
                   backgroundImage: 'linear-gradient(135deg, #0A2D55 0%, #0C3B6E 40%, #0A2D55 100%)',
                 }}
@@ -1453,7 +1670,7 @@ export function Dashboard({
                 </div>
               </div>
 
-              <div className="px-6 py-5 text-white/90">
+              <div className="px-4 sm:px-6 py-4 sm:py-5 text-white/90">
                 <p className="text-sm">Are you sure you want to delete this mapping? This action cannot be undone.</p>
                 <div className="mt-4 rounded-xl border border-white/15 bg-white/10 p-3 text-xs">
                   <p className="font-semibold text-white">{deleteTarget.surveyNumber || 'Untitled Mapping'}</p>
@@ -1461,7 +1678,7 @@ export function Dashboard({
                 </div>
               </div>
 
-              <div className="px-6 py-4 border-t border-white/15 flex items-center justify-end gap-3">
+              <div className="px-4 sm:px-6 py-4 border-t border-white/15 flex items-center justify-end gap-3">
                 <button
                   type="button"
                   onClick={handleCloseDeleteModal}
@@ -1505,13 +1722,13 @@ export function Dashboard({
 
           <div
             className={cn(
-              "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[99] w-[92%] max-w-2xl transition-all duration-200",
+              "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[99] w-[96vw] max-w-[920px] sm:w-[92%] transition-all duration-200",
               isClosingViewModal ? "animate-out zoom-out fade-out" : "animate-in zoom-in fade-in"
             )}
           >
-            <div className="relative rounded-2xl border border-white/20 bg-white/10 backdrop-blur-2xl shadow-2xl shadow-black/35 overflow-hidden">
+            <div className="relative rounded-2xl border border-white/20 bg-white/10 backdrop-blur-2xl shadow-2xl shadow-black/35 max-h-[92vh] flex flex-col overflow-hidden">
               <div
-                className="px-6 py-5"
+                className="px-4 sm:px-6 py-4 sm:py-5"
                 style={{
                   backgroundImage: 'linear-gradient(135deg, #0A2D55 0%, #0C3B6E 40%, #0A2D55 100%)',
                 }}
@@ -1537,7 +1754,7 @@ export function Dashboard({
                 </div>
               </div>
 
-              <div className="px-6 py-5 text-white/90">
+              <div className="px-4 sm:px-6 py-4 sm:py-5 text-white/90 overflow-y-auto flex-1">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                   <div>
                     <p className="text-xs font-semibold text-white/70">Survey Number</p>
@@ -1576,15 +1793,7 @@ export function Dashboard({
                 </div>
               </div>
 
-              <div className="px-6 py-4 border-t border-white/15 flex justify-end">
-                <button
-                  type="button"
-                  onClick={handleCloseViewModal}
-                  className="px-4 py-2 rounded-lg border border-white/20 text-white/90 hover:bg-white/10 transition"
-                >
-                  Close
-                </button>
-              </div>
+              {/* Footer removed (use header X to close) */}
             </div>
           </div>
         </>
@@ -1612,10 +1821,10 @@ export function Dashboard({
           
           {/* Modal Card */}
           <div className={cn(
-            "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[101] w-[90%] max-w-md transition-all duration-200",
+            "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[101] w-[92vw] max-w-[420px] sm:w-[90%] transition-all duration-200",
             isClosingModal ? "animate-out zoom-out fade-out" : "animate-in zoom-in fade-in"
           )}>
-            <div className="relative rounded-2xl border border-white/20 bg-white/10 backdrop-blur-2xl shadow-2xl shadow-black/35 overflow-hidden">
+            <div className="relative rounded-2xl border border-white/20 bg-white/10 backdrop-blur-2xl shadow-2xl shadow-black/35 max-h-[90vh] overflow-y-auto">
               {/* Loading overlay */}
               {isLoggingOut && (
                 <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#071A2C]/20 backdrop-blur-md">
@@ -1630,7 +1839,7 @@ export function Dashboard({
 
               {/* Header with gradient */}
               <div 
-                className="px-6 py-5"
+                className="px-4 sm:px-6 py-4 sm:py-5"
                 style={{
                   backgroundImage: 'linear-gradient(135deg, #0A2D55 0%, #0C3B6E 40%, #0A2D55 100%)',
                 }}
@@ -1644,14 +1853,14 @@ export function Dashboard({
               </div>
 
               {/* Content */}
-              <div className="px-6 py-8">
+              <div className="px-4 sm:px-6 py-6">
                 <p className="text-white/90 text-sm leading-relaxed">
                   Are you sure you want to log out? Any unsaved changes will be lost.
                 </p>
               </div>
 
               {/* Actions */}
-              <div className="px-6 py-5 bg-white/5 backdrop-blur-sm flex items-center justify-end gap-3 border-t border-white/10">
+              <div className="px-4 sm:px-6 py-4 bg-white/5 backdrop-blur-sm flex items-center justify-end gap-3 border-t border-white/10">
                 <button
                   onClick={handleCloseModal}
                   disabled={isLoggingOut}

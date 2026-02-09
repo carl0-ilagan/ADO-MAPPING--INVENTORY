@@ -458,12 +458,12 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
           />
           
           <div className={cn(
-            "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[101] w-[90%] max-w-md transition-all duration-200",
+            "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[101] w-[92vw] max-w-[420px] sm:w-[90%] transition-all duration-200",
             isClosingEmailModal ? "animate-out zoom-out fade-out" : "animate-in zoom-in fade-in"
           )}>
-            <div className="relative rounded-2xl border border-white/20 bg-white/10 backdrop-blur-2xl shadow-2xl shadow-black/35 overflow-hidden">
+            <div className="relative rounded-2xl border border-white/20 bg-white/10 backdrop-blur-2xl shadow-2xl shadow-black/35 max-h-[90vh] overflow-y-auto">
               {/* Header */}
-              <div className="bg-gradient-to-r from-[#0A2D55] to-[#0C3B6E] px-6 py-5">
+              <div className="bg-gradient-to-r from-[#0A2D55] to-[#0C3B6E] px-4 sm:px-6 py-4 sm:py-5">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 bg-white/15 rounded-2xl flex items-center justify-center ring-2 ring-white/25 shadow-xl">
                     <Mail size={22} className="text-white" />
@@ -473,7 +473,7 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
               </div>
 
               {/* Form */}
-              <form onSubmit={handleUpdateEmail} className="p-6 space-y-5 text-white/90">
+              <form onSubmit={handleUpdateEmail} className="p-4 sm:p-6 space-y-5 text-white/90">
                 <div>
                   <label className="block text-sm font-semibold text-white/80 mb-2">
                     New Email Address
@@ -572,12 +572,12 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
           />
           
           <div className={cn(
-            "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[101] w-[90%] max-w-md transition-all duration-200",
+            "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[101] w-[92vw] max-w-[420px] sm:w-[90%] transition-all duration-200",
             isClosingPasswordModal ? "animate-out zoom-out fade-out" : "animate-in zoom-in fade-in"
           )}>
-            <div className="relative rounded-2xl border border-white/20 bg-white/10 backdrop-blur-2xl shadow-2xl shadow-black/35 overflow-hidden">
+            <div className="relative rounded-2xl border border-white/20 bg-white/10 backdrop-blur-2xl shadow-2xl shadow-black/35 max-h-[90vh] overflow-y-auto">
               {/* Header */}
-              <div className="bg-gradient-to-r from-[#0A2D55] to-[#0C3B6E] px-6 py-5">
+              <div className="bg-gradient-to-r from-[#0A2D55] to-[#0C3B6E] px-4 sm:px-6 py-4 sm:py-5">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 bg-white/15 rounded-2xl flex items-center justify-center ring-2 ring-white/25 shadow-xl">
                     <Key size={22} className="text-white" />
@@ -587,7 +587,7 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
               </div>
 
               {/* Form */}
-              <form onSubmit={handleUpdatePassword} className="p-6 space-y-5 text-white/90">
+              <form onSubmit={handleUpdatePassword} className="p-4 sm:p-6 space-y-5 text-white/90">
                 <div>
                   <label className="block text-sm font-semibold text-white/80 mb-2">
                     Current Password
@@ -792,7 +792,7 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
       )}
 
       {/* Floating Action Button with Menu */}
-      <div className="fixed bottom-8 right-8 z-50">
+      <div className="fixed right-8 z-50 bottom-20 sm:bottom-8" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
         {/* Back to Dashboard Button - Top */}
         <button
           onClick={() => {
@@ -883,10 +883,10 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
           />
 
           <div className={cn(
-            "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[101] w-[90%] max-w-md transition-all duration-200",
+            "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[101] w-[92vw] max-w-[420px] sm:w-[90%] transition-all duration-200",
             isClosingExportModal ? "animate-out zoom-out fade-out" : "animate-in zoom-in fade-in"
           )}>
-            <div className="relative rounded-2xl border border-white/20 bg-white/10 backdrop-blur-2xl shadow-2xl shadow-black/35 overflow-hidden">
+            <div className="relative rounded-2xl border border-white/20 bg-white/10 backdrop-blur-2xl shadow-2xl shadow-black/35 max-h-[90vh] overflow-y-auto">
               {isExporting && (
                 <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#071A2C]/20 backdrop-blur-md">
                   <div className="flex flex-col items-center gap-3">
@@ -899,7 +899,7 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
               )}
 
               <div
-                className="px-6 py-5"
+                className="px-4 sm:px-6 py-4 sm:py-5"
                 style={{
                   backgroundImage: 'linear-gradient(135deg, #0A2D55 0%, #0C3B6E 40%, #0A2D55 100%)',
                 }}
@@ -912,7 +912,7 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
                 </div>
               </div>
 
-              <div className="px-6 py-5 text-white/90">
+              <div className="px-4 sm:px-6 py-4 sm:py-5 text-white/90">
                 <p className="text-sm">Choose a file name and location to save the Excel workbook.</p>
                 <div className="mt-4">
                   <label className="block text-xs font-semibold text-white/70 mb-2">File name</label>
@@ -932,7 +932,7 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
                 )}
               </div>
 
-              <div className="px-6 py-4 border-t border-white/15 flex items-center justify-end gap-3">
+              <div className="px-4 sm:px-6 py-4 border-t border-white/15 flex items-center justify-end gap-3">
                 <button
                   type="button"
                   onClick={handleCloseExportModal}

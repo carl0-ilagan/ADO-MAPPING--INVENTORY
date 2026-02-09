@@ -1,0 +1,28 @@
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Users collection - users can read/write their own data
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null;
+    }
+    
+    // Mappings collection - authenticated users can read/write
+    match /mappings/{mappingId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Allow authenticated users to create/read/write their own import collections.
+    // Collection names must start with `mappings_import_<uid>_...`.
+    match /{collId}/{docId} {
+      allow read, write: if request.auth != null
+        && collId.matches('^mappings_import_' + request.auth.uid + '.*$');
+    }
+    
+    // Allow users to list their registered import collections under users/{uid}/imports
+    match /users/{userId}/imports/{importId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}

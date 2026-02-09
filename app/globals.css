@@ -351,3 +351,10 @@
 .scrollable-table::-webkit-scrollbar {
   display: none;
 }
+
+/* Make sure interactive controls show the pointer (hand) cursor */
+button,
+[role="button"],
+.btn {
+  cursor: pointer;
+}

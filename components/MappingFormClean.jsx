@@ -598,7 +598,7 @@ export default function MappingForm({
           )}
 
           <form onSubmit={handleSave} className="flex-1 flex flex-col min-h-0">
-            <div className="flex-1 overflow-y-auto overflow-x-hidden hide-scrollbar p-4 sm:p-7">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden hide-scrollbar p-4 sm:p-7 pb-28 sm:pb-24">
               <div className="space-y-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
@@ -717,7 +717,10 @@ export default function MappingForm({
               </div>
             </div>
 
-            <div className="sticky bottom-0 bg-white/95 backdrop-blur border-t border-[#0A2D55]/10 px-4 sm:px-7 py-4">
+            <div
+              className="sticky bottom-0 z-50 bg-white/95 backdrop-blur border-t border-[#0A2D55]/10 px-4 sm:px-7 py-4"
+              style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+            >
               <div className="flex flex-col sm:flex-row gap-3 justify-end">
                 <button type="button" onClick={onBack} disabled={isSaving} className={cn("w-full sm:w-auto px-5 py-2.5 border-2 border-[#0A2D55]/15 text-[#0A2D55] rounded-xl hover:bg-[#0A2D55]/5 transition", isSaving ? "opacity-60 cursor-not-allowed" : "")}>Cancel</button>
                 <button
