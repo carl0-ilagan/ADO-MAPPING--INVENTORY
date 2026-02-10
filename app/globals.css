@@ -50,6 +50,10 @@
   --sidebar-ring: #A8CBB7;
 }
 
+:root {
+  --sidebar-width: 0px;
+}
+
 .dark {
   --background: #1A1A1A;
   --foreground: #F5F5F5;
@@ -357,4 +361,9 @@ button,
 [role="button"],
 .btn {
   cursor: pointer;
+}
+
+main {
+  transition: margin-left 220ms ease;
+  min-height: 100vh;
 }
