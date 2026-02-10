@@ -19,6 +19,11 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  mapHeadersToFields,
+  buildFirestoreDocument,
+  isValidRow,
+} from '@/lib/firestoreSchema';
 
 export function Dashboard({
   user,
@@ -67,6 +72,9 @@ export function Dashboard({
   const [importRawSheets, setImportRawSheets] = useState([]);
   const [importCollectionName, setImportCollectionName] = useState('');
   const [showInvalidDetails, setShowInvalidDetails] = useState(false);
+  const [showClearAllModal, setShowClearAllModal] = useState(false);
+  const [isClosingClearAllModal, setIsClosingClearAllModal] = useState(false);
+  const [isClearingAll, setIsClearingAll] = useState(false);
   const fileInputRef = useRef(null);
   const itemsPerPage = 15;
 
@@ -166,6 +174,46 @@ export function Dashboard({
           .filter(Boolean);
     if (items.length <= 2) return items.join(', ');
     return `${items.slice(0, 2).join(', ')}...`;
+  };
+
+  const isInventoryUser = (user?.email || '').toLowerCase() === 'ncip@inventory.gov.ph';
+  const NCIP_TABLE_HEADERS = [
+    'No.',
+    'Region',
+    'Control number',
+    'Applicant/Proponent',
+    'Name of Project',
+    'Nature of Project',
+    'Project Cost',
+    'CADT Status',
+    'ICC',
+    'Location',
+    'Year Approved',
+    'Remarks',
+  ];
+  const DEFAULT_TABLE_HEADERS = ['SURVEY NUMBER', 'REGION', 'PROVINCE', 'MUNICIPALITY/IES', 'BARANGAY/S', 'AREA (HA)', 'ICCS/IPS', 'REMARKS', 'ACTIONS'];
+
+  const getTableHeaders = () => (isInventoryUser ? NCIP_TABLE_HEADERS : DEFAULT_TABLE_HEADERS);
+
+  const renderCellForHeader = (mapping, header) => {
+    const h = String(header || '').toLowerCase();
+    if (h === 'no.' || h === 'survey number') return mapping.surveyNumber || mapping.controlNumber || '-';
+    if (h === 'region') return mapping.region || '-';
+    if (h === 'control number') return mapping.controlNumber || mapping.surveyNumber || '-';
+    if (h.includes('applicant') || h.includes('proponent')) return mapping.applicant || mapping.proponent || mapping.applicantProponent || '-';
+    if (h.includes('name of project') || h.includes('name')) return mapping.nameOfProject || mapping.projectName || '-';
+    if (h.includes('nature')) return mapping.nature || mapping.natureOfProject || '-';
+    if (h.includes('project cost') || h.includes('cost')) return mapping.projectCost || '-';
+    if (h.includes('cadt')) return mapping.cadtStatus || mapping.cadt || '-';
+    if (h === 'icc' || h.includes('icc')) return (mapping.icc && mapping.icc.length) ? mapping.icc.join(', ') : '-';
+    if (h === 'location') return mapping.location || mapping.province || '-';
+    if (h.includes('year')) return mapping.yearApproved || mapping.year || '-';
+    if (h.includes('province')) return mapping.province || '-';
+    if (h.includes('municipality')) return mapping.municipality || (Array.isArray(mapping.municipalities) ? mapping.municipalities.join(', ') : '-') || '-';
+    if (h.includes('barangay')) return mapping.barangays || (Array.isArray(mapping.barangays) ? mapping.barangays.join(', ') : '-') || '-';
+    if (h.includes('area')) return mapping.totalArea?.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 }) || '-';
+    if (h.includes('remark')) return mapping.remarks || '-';
+    return '-';
   };
 
   const getMunicipalities = (mapping) => (
@@ -334,15 +382,26 @@ export function Dashboard({
       const headerKeywords = [
         'survey',
         'number',
+        'no.',
+        'control',
+        'control number',
+        'applicant',
+        'proponent',
+        'applicant/proponent',
+        'name of project',
+        'project',
         'location',
         'province',
         'municipality',
         'barangay',
         'area',
         'icc',
+        'iccs',
+        'cadt',
         'remarks',
         'region',
         'sheet',
+        'year',
       ];
 
       const scoreHeaderRow = (row) => {
@@ -373,6 +432,15 @@ export function Dashboard({
           }
         }
 
+        console.log(`🔍 Header detection - Best match: row ${bestIndex}, matches: ${bestMatches}, nonEmpty: ${bestNonEmpty}`);
+        if (bestIndex >= 0 && bestIndex < 10) {
+          console.log(`🔍 Header row candidates (first 10 rows):`, allRows.slice(0, 10).map((r, i) => ({ 
+            row: i, 
+            score: scoreHeaderRow(r),
+            cells: r.slice(0, 5)
+          })));
+        }
+
         if (bestMatches > 0) return bestIndex;
 
         let fallbackIndex = -1;
@@ -393,9 +461,12 @@ export function Dashboard({
         const headerRowIndex = findHeaderRowIndex(rows);
         if (headerRowIndex === -1) return { records: [], rawRecords: [], error: 'no-header', sheetName };
 
-        const headerRow = rows[headerRowIndex].map(normalizeHeader);
         const headerRowOriginal = rows[headerRowIndex].map((h) => String(h || '').trim());
-        // build rawRecords: each physical row becomes an object mapping sanitized header -> cell value
+
+        console.log(`📋 Sheet "${sheetName}" - Header row found at index ${headerRowIndex}`);
+        console.log(`📋 Sheet "${sheetName}" - Headers:`, headerRowOriginal);
+
+        // Build rawRecords for diagnostics
         const rawRecords = rows.slice(headerRowIndex + 1).map((row) => {
           const obj = {};
           for (let i = 0; i < headerRowOriginal.length; i += 1) {
@@ -404,186 +475,61 @@ export function Dashboard({
           }
           return obj;
         });
-        const colIndex = (candidates) => headerRow.findIndex((h) => {
-          const compact = compactHeader(h);
-          return candidates.some((c) => {
-            const cNorm = normalizeHeader(c);
-            const cCompact = compactHeader(c);
-            return h === cNorm || h.includes(cNorm) || compact.includes(cCompact);
-          });
-        });
 
-        let surveyIdx = colIndex(['survey number', 'survey no', 'survey #']);
-        let locationIdx = colIndex(['location']);
-        let provinceIdx = colIndex(['province']);
-        let municipalityIdx = colIndex(['municipality', 'municipality/ies']);
-        let barangayIdx = colIndex(['barangays', 'barangay/s']);
-        let areaIdx = colIndex(['total area', 'area', 'area (ha)']);
-        let iccIdx = colIndex(['icc', 'iccs/ips', 'iccs', 'icc/ips']);
-        let remarksIdx = colIndex(['remarks']);
-        let regionIdx = colIndex(['region', 'sheet']);
+        // Use schema-based field mapping (header tokens, not indexes)
+        const fieldMap = mapHeadersToFields(headerRowOriginal);
+        
+        // Require at least one core field to be mapped
+        const hasCoreField = (
+          fieldMap.control_number !== undefined ||
+          fieldMap.survey_number !== undefined ||
+          fieldMap.applicant_proponent !== undefined ||
+          fieldMap.name_of_project !== undefined
+        );
 
-        let hasLocationFormat = locationIdx !== -1 && provinceIdx === -1 && municipalityIdx === -1 && barangayIdx === -1;
-
-        if (!hasLocationFormat && locationIdx === -1 && headerRow.length >= 5) {
-          const mergedHeader = compactHeader(headerRow.join(' '));
-          if (mergedHeader.includes('survey') && mergedHeader.includes('location') && mergedHeader.includes('area')) {
-            locationIdx = 1;
-            provinceIdx = -1;
-            municipalityIdx = -1;
-            barangayIdx = -1;
-            areaIdx = 2;
-            iccIdx = 3;
-            remarksIdx = 4;
-            regionIdx = -1;
-            hasLocationFormat = true;
-          }
+        if (!hasCoreField) {
+          console.error(`❌ Sheet "${sheetName}" - No core fields mapped!`, { fieldMap, headers: headerRowOriginal });
+          return { records: [], rawRecords, error: 'invalid-headers', sheetName, found: headerRowOriginal };
         }
 
-        if (!hasLocationFormat && surveyIdx === -1) {
-          if (headerRow.length >= 8) {
-            surveyIdx = 0;
-            provinceIdx = 1;
-            municipalityIdx = 2;
-            barangayIdx = 3;
-            areaIdx = 4;
-            iccIdx = 5;
-            remarksIdx = 6;
-            regionIdx = 7;
-          } else if (headerRow.length >= 7) {
-            surveyIdx = 0;
-            provinceIdx = 1;
-            municipalityIdx = 2;
-            barangayIdx = 3;
-            areaIdx = 4;
-            iccIdx = 5;
-            remarksIdx = 6;
-            regionIdx = -1;
-          } else if (headerRow.length >= 5) {
-            surveyIdx = 0;
-            locationIdx = 1;
-            areaIdx = 2;
-            iccIdx = 3;
-            remarksIdx = 4;
-            regionIdx = -1;
-            hasLocationFormat = true;
-          }
-        }
+        console.log(`✅ Sheet "${sheetName}" - Core fields found, proceeding with import`);
 
-        if (!hasLocationFormat && [surveyIdx, provinceIdx, municipalityIdx, barangayIdx, areaIdx, iccIdx, remarksIdx].some((idx) => idx === -1)) {
-          return { records: [], rawRecords, error: 'invalid-headers', sheetName, found: rows[headerRowIndex] };
-        }
-
-        if (hasLocationFormat && [surveyIdx, locationIdx, areaIdx, iccIdx, remarksIdx].some((idx) => idx === -1)) {
-          return { records: [], rawRecords, error: 'invalid-headers', sheetName, found: rows[headerRowIndex] };
-        }
+        // Detect region from sheet name
+        const fallbackRegion = detectRegionSheet(sheetName) || sheetName || '';
+        
+        // Generate batch ID for this import
+        const batchId = `batch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
         const records = [];
-        const fallbackRegion = detectRegionSheet(sheetName) || sheetName || '';
+        const dataRows = rows.slice(headerRowIndex + 1);
 
-        if (hasLocationFormat) {
-          let current = null;
+        dataRows.forEach((row) => {
+          // Build Firestore document using schema
+          const doc = buildFirestoreDocument(row, fieldMap, sheetName, batchId);
+          
+          // Override region if not present in data
+          if (!doc.region) {
+            doc.region = fallbackRegion;
+          }
 
-          const flushCurrent = () => {
-            if (!current) return;
-            const municipalities = Array.from(new Set(current.municipalities));
-            const barangays = Array.from(new Set(current.barangays));
-            const provinces = Array.from(new Set(current.provinces));
-            records.push({
-              surveyNumber: current.surveyNumber,
-              province: provinces.join(', '),
-              municipality: municipalities.join(', '),
-              municipalities,
-              barangays,
-              totalArea: current.totalArea,
-              icc: current.icc,
-              remarks: current.remarks,
-              region: fallbackRegion,
-            });
-          };
+          // Validate row is not empty
+          if (isValidRow(doc)) {
+            records.push(doc);
+          }
+        });
 
-          rows.slice(headerRowIndex + 1).forEach((row) => {
-            const surveyCell = String(row[surveyIdx] || '').trim();
-            const locationCell = String(row[locationIdx] || '').trim();
-            const areaCell = row[areaIdx];
-            const iccCellRaw = String(row[iccIdx] || '').trim();
-            const remarksCellRaw = String(row[remarksIdx] || '').trim();
-
-            if (surveyCell) {
-              flushCurrent();
-              const iccValue = iccCellRaw.toLowerCase() === 'void' ? '' : iccCellRaw;
-              const remarksValue = remarksCellRaw.toLowerCase() === 'void' ? '' : remarksCellRaw;
-              current = {
-                surveyNumber: surveyCell,
-                provinces: [],
-                municipalities: [],
-                barangays: [],
-                totalArea: parseAreaValue(areaCell),
-                icc: splitIccValue(iccValue),
-                remarks: remarksValue,
-              };
-            } else if (!current) {
-              return;
-            }
-
-            if (areaCell && current.totalArea === 0) {
-              current.totalArea = parseAreaValue(areaCell);
-            }
-
-            if (iccCellRaw && current.icc.length === 0) {
-              const iccValue = iccCellRaw.toLowerCase() === 'void' ? '' : iccCellRaw;
-              current.icc = splitIccValue(iccValue);
-            }
-
-            if (remarksCellRaw && !current.remarks) {
-              current.remarks = remarksCellRaw.toLowerCase() === 'void' ? '' : remarksCellRaw;
-            }
-
-            if (locationCell) {
-              const parsed = parseLocationLine(locationCell);
-              if (parsed.type === 'barangay') current.barangays.push(...parsed.items);
-              if (parsed.type === 'municipality') current.municipalities.push(...parsed.items);
-              if (parsed.type === 'province') current.provinces.push(...parsed.items);
-            }
-          });
-
-          flushCurrent();
-        } else {
-          rows.slice(headerRowIndex + 1).forEach((row) => {
-            const surveyNumber = String(row[surveyIdx] || '').trim();
-            if (!surveyNumber) return;
-
-            const province = String(row[provinceIdx] || '').trim();
-            const municipalityRaw = String(row[municipalityIdx] || '').trim();
-            const barangayRaw = String(row[barangayIdx] || '').trim();
-            const totalArea = parseAreaValue(row[areaIdx]);
-            const icc = splitIccValue(row[iccIdx]);
-            const remarks = String(row[remarksIdx] || '').trim();
-            const regionCell = regionIdx !== -1 ? String(row[regionIdx] || '').trim() : '';
-
-            const municipalities = splitListValue(municipalityRaw);
-            const barangays = splitListValue(barangayRaw);
-
-            records.push({
-              surveyNumber,
-              province,
-              municipality: municipalities.join(', '),
-              municipalities,
-              barangays,
-              totalArea,
-              icc,
-              remarks,
-              region: regionCell || fallbackRegion,
-            });
-          });
-        }
+        console.log(`✅ Sheet "${sheetName}" - Imported ${records.length} records`);
 
         return { records, rawRecords, error: null, sheetName };
       };
 
       const allRecords = [];
       const invalidSheets = [];
+      const skipSheets = new Set(['summary', 'summary per year']);
       const dataSheets = wb.SheetNames.filter((sheetName) => {
+        if (!sheetName) return false;
+        const sn = String(sheetName || '').trim().toLowerCase();
+        if (skipSheets.has(sn)) return false;
         const ws = wb.Sheets[sheetName];
         if (!ws) return false;
         const wsRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
@@ -773,6 +719,34 @@ export function Dashboard({
     }
   };
 
+  // Clear all records handler
+  const handleClearAll = async () => {
+    setIsClearingAll(true);
+    try {
+      // Delete all mappings one by one
+      for (const mapping of mappings) {
+        await onDeleteMapping(mapping.id);
+      }
+      setAlertTick((t) => t + 1);
+      setAlert({ type: 'success', message: `Successfully deleted ${mappings.length} record(s).` });
+      handleCloseClearAllModal();
+    } catch (error) {
+      setAlertTick((t) => t + 1);
+      setAlert({ type: 'error', message: error?.message || 'Failed to clear records.' });
+    } finally {
+      setIsClearingAll(false);
+    }
+  };
+
+  const handleCloseClearAllModal = () => {
+    if (isClearingAll) return;
+    setIsClosingClearAllModal(true);
+    setTimeout(() => {
+      setShowClearAllModal(false);
+      setIsClosingClearAllModal(false);
+    }, 200);
+  };
+
   // Handle modal close with animation
   const handleCloseModal = () => {
     if (isLoggingOut) return;
@@ -861,6 +835,88 @@ export function Dashboard({
           </div>
         </div>
       )}
+      {/* Clear All Confirmation Modal */}
+      {showClearAllModal && (
+        <>
+          <div
+            className={cn(
+              "fixed inset-0 z-[100] transition-all duration-200",
+              isClosingClearAllModal ? "animate-out fade-out" : "animate-in fade-in"
+            )}
+            style={{ backdropFilter: 'blur(8px)', backgroundColor: 'rgba(3,6,23,0.45)' }}
+            onClick={() => {
+              if (!isClearingAll) {
+                setIsClosingClearAllModal(true);
+                setTimeout(() => {
+                  setShowClearAllModal(false);
+                  setIsClosingClearAllModal(false);
+                }, 200);
+              }
+            }}
+          />
+
+          <div className={cn(
+            "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[101] w-[92vw] max-w-md transition-all duration-200",
+            isClosingClearAllModal ? "animate-out zoom-out fade-out" : "animate-in zoom-in fade-in"
+          )}>
+            <div className="relative rounded-2xl border border-white/20 bg-white/10 backdrop-blur-2xl shadow-2xl shadow-black/35 overflow-hidden">
+              <div className="px-4 sm:px-6 py-4 sm:py-5" style={{ backgroundImage: 'linear-gradient(135deg, #DC2626 0%, #991B1B 100%)' }}>
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-white/15 rounded-2xl flex items-center justify-center ring-2 ring-white/25 shadow-xl">
+                    <Trash2 size={22} className="text-white" />
+                  </div>
+                  <h3 className="text-xl font-bold text-white tracking-tight">Clear All Records</h3>
+                </div>
+              </div>
+
+              <div className="px-4 sm:px-6 py-4 sm:py-5 text-white/90">
+                <p className="text-sm mb-3">
+                  Are you sure you want to delete <strong className="text-red-300">{mappings.length}</strong> record(s)?
+                </p>
+                <p className="text-xs text-white/70">
+                  This action cannot be undone. All data will be permanently removed from the database.
+                </p>
+              </div>
+
+              <div className="px-4 sm:px-6 py-3 border-t border-white/15 flex gap-3 bg-white/5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsClosingClearAllModal(true);
+                    setTimeout(() => {
+                      setShowClearAllModal(false);
+                      setIsClosingClearAllModal(false);
+                    }, 200);
+                  }}
+                  disabled={isClearingAll}
+                  className="flex-1 px-4 py-2 rounded-lg border border-white/20 text-white/90 hover:bg-white/10 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClearAll}
+                  disabled={isClearingAll}
+                  className="flex-1 px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {isClearingAll ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Deleting...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 size={16} />
+                      Delete All
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
       {/* Import Choice Modal */}
       {showImportChoiceModal && (
         <>
@@ -1012,7 +1068,24 @@ export function Dashboard({
               </p>
             </div>
           </div>
-          
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={onLogout}
+              className="hidden sm:inline-flex items-center gap-2 px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-md transition"
+            >
+              Logout
+            </button>
+            <button
+              type="button"
+              onClick={onLogout}
+              className="sm:hidden inline-flex items-center justify-center w-10 h-10 bg-white/10 text-white rounded-full transition"
+              aria-label="Logout"
+            >
+              ⎋
+            </button>
+          </div>
+
         </div>
       </header>
 
@@ -1077,6 +1150,16 @@ export function Dashboard({
                   <Upload size={16} className="sm:w-4.5 sm:h-4.5" />
                   Upload Excel
                 </button>
+                {mappings.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowClearAllModal(true)}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white ring-1 ring-red-500/30 backdrop-blur-md hover:bg-red-500/30 transition active:scale-95"
+                  >
+                    <Trash2 size={16} className="sm:w-4.5 sm:h-4.5" />
+                    Clear All Records
+                  </button>
+                )}
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -1250,43 +1333,45 @@ export function Dashboard({
             ) : (
               <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg border border-white/20 overflow-hidden animate-section-2">
                 {/* Desktop Table */}
-                <div className="hidden sm:block overflow-x-hidden">
-                  <table className="w-full table-fixed">
+                <div className="hidden sm:block overflow-x-auto">
+                  <table className={isInventoryUser ? "w-full table-auto min-w-[1600px]" : "w-full table-fixed"}>
                     <thead className="bg-[#0A2D55]/5 border-b border-[#0A2D55]/15">
                       <tr>
-                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-[#0A2D55] uppercase tracking-wide">Survey Number</th>
-                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-[#0A2D55] uppercase tracking-wide">Region</th>
-                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-[#0A2D55] uppercase tracking-wide">Province</th>
-                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-[#0A2D55] uppercase tracking-wide">Municipality/ies</th>
-                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-[#0A2D55] uppercase tracking-wide">Barangay/s</th>
-                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-[#0A2D55] uppercase tracking-wide">Area (ha)</th>
-                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-[#0A2D55] uppercase tracking-wide">ICCs/IPs</th>
-                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-[#0A2D55] uppercase tracking-wide">Remarks</th>
-                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-[#0A2D55] uppercase tracking-wide w-[120px] sticky right-0 bg-[#F4F7FA] shadow-[-6px_0_10px_rgba(7,26,44,0.06)]">Actions</th>
+                        {getTableHeaders().map((h, idx) => (
+                          <th
+                            key={idx}
+                            className={
+                              isInventoryUser
+                                ? "px-4 sm:px-6 py-3 text-left text-xs font-semibold text-[#0A2D55] uppercase tracking-wide whitespace-normal break-words min-w-[140px]"
+                                : "px-4 sm:px-6 py-3 text-left text-xs font-semibold text-[#0A2D55] uppercase tracking-wide"
+                            }
+                          >
+                            {h}
+                          </th>
+                        ))}
+                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-[#0A2D55] uppercase tracking-wide w-[120px] sticky right-0 bg-[#F4F7FA] shadow-[-6px_0_10px_rgba(7,26,44,0.06)]">ACTIONS</th>
                       </tr>
                     </thead>
                     <tbody>
                       {paginatedMappings.map((mapping, idx) => (
-                        <tr 
-                          key={idx} 
+                        <tr
+                          key={idx}
                           className="border-b border-[#0A2D55]/10 hover:bg-[#F2C94C]/5 transition fade-in-up"
-                          style={{ 
-                            animationDelay: `${idx * 100 + 400}ms`,
-                            opacity: 0
-                          }}
+                          style={{ animationDelay: `${idx * 100 + 400}ms`, opacity: 0 }}
                         >
-                          <td className="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-medium text-[#0A2D55]">{mapping.surveyNumber}</td>
-                          <td className="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 max-w-xs truncate">{mapping.region || '-'}</td>
-                          <td className="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 max-w-[140px] truncate" title={mapping.province || ''}>{mapping.province || '-'}</td>
-                          <td className="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 max-w-[180px] truncate" title={getMunicipalities(mapping) || ''}>{getMunicipalities(mapping) || '-'}</td>
-                          <td className="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 max-w-[200px] truncate" title={getBarangays(mapping) || ''}>{getBarangays(mapping) || '-'}</td>
-                          <td className="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 font-mono">
-                            {mapping.totalArea?.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
-                          </td>
-                          <td className="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 max-w-xs truncate">{mapping.icc?.join(', ') || '-'}</td>
-                          <td className="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 max-w-xs truncate">
-                            {mapping.remarks || '-'}
-                          </td>
+                          {getTableHeaders().map((h, i) => (
+                            <td
+                              key={i}
+                              className={
+                                isInventoryUser
+                                  ? "px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 whitespace-normal break-words min-w-[140px]"
+                                  : "px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 max-w-xs truncate"
+                              }
+                              title={String(renderCellForHeader(mapping, h) || '')}
+                            >
+                              {renderCellForHeader(mapping, h)}
+                            </td>
+                          ))}
                           <td className="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm w-[120px] sticky right-0 bg-white shadow-[-6px_0_10px_rgba(7,26,44,0.06)]">
                             <div className="flex items-center gap-1.5">
                               <button
@@ -1337,17 +1422,17 @@ export function Dashboard({
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
-                          <p className="text-xs text-[#0A2D55]/60 font-medium">Survey Number</p>
+                          <p className="text-xs text-[#0A2D55]/60 font-medium">SURVEY NUMBER</p>
                           <p className="text-sm font-bold text-[#0A2D55] truncate">{mapping.surveyNumber}</p>
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <div>
-                          <p className="text-xs text-[#0A2D55]/60 font-medium">Region</p>
+                          <p className="text-xs text-[#0A2D55]/60 font-medium">REGION</p>
                           <p className="text-xs text-[#0A2D55]/90 truncate">{mapping.region || '-'}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-[#0A2D55]/60 font-medium">Area (ha)</p>
+                          <p className="text-xs text-[#0A2D55]/60 font-medium">AREA (HA)</p>
                           <p className="text-xs text-[#0A2D55]/90 font-mono">
                             {mapping.totalArea?.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                           </p>
@@ -1366,7 +1451,7 @@ export function Dashboard({
                         <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{getBarangays(mapping) || '-'}</p>
                       </div>
                       <div>
-                        <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">ICCs/IPs</p>
+                        <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">ICCS/IPS</p>
                         <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{mapping.icc?.join(', ') || '-'}</p>
                       </div>
                       {mapping.remarks && (
