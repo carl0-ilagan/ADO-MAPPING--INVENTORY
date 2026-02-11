@@ -244,12 +244,14 @@ function SearchableSelect({ options = [], selected = null, onChange = () => {}, 
 
 export default function MappingForm({
   isModal = false,
+  user = null,
   onBack = () => {},
   onSubmit = () => {},
   initialData = null,
   formTitle = "Add New Mapping",
   submitLabel = "Save Mapping",
 }) {
+  const isInventoryUser = (user?.email || '').toLowerCase() === 'ncip@inventory.gov.ph';
   const [regions, setRegions] = useState([]);
   const [provincesAll, setProvincesAll] = useState([]);
   const [municipalitiesAll, setMunicipalitiesAll] = useState([]);
@@ -270,11 +272,23 @@ export default function MappingForm({
   const [surveyNumber, setSurveyNumber] = useState("");
   const [totalArea, setTotalArea] = useState("");
   const [remarks, setRemarks] = useState("");
+  const [communityBenefits, setCommunityBenefits] = useState("");
   const [errors, setErrors] = useState({});
   const [isHydrating, setIsHydrating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [alert, setAlert] = useState(null);
   const [alertTick, setAlertTick] = useState(0);
+
+  // NCIP-specific fields
+  const [controlNumber, setControlNumber] = useState("");
+  const [applicantProponent, setApplicantProponent] = useState("");
+  const [nameOfProject, setNameOfProject] = useState("");
+  const [natureOfProject, setNatureOfProject] = useState("");
+  const [projectCost, setProjectCost] = useState("");
+  const [cadtStatus, setCadtStatus] = useState("");
+  const [location, setLocation] = useState("");
+  const [yearApproved, setYearApproved] = useState("");
+  const [moaDuration, setMoaDuration] = useState("");
 
   const normalize = (value) => String(value || "").trim().toLowerCase();
 
@@ -397,6 +411,19 @@ export default function MappingForm({
     setSelectedMunicipalityCodes(new Set(municipalityCodes));
     setSelectedBarangayCodes(new Set(barangayCodes));
     setSelectedIccIpCodes(new Set(Array.isArray(initialData.icc) ? initialData.icc : []));
+    
+    // NCIP-specific fields
+    setControlNumber(initialData.controlNumber || "");
+    setApplicantProponent(initialData.applicantProponent || initialData.applicant || initialData.proponent || "");
+    setNameOfProject(initialData.nameOfProject || initialData.projectName || "");
+    setNatureOfProject(initialData.natureOfProject || initialData.nature || "");
+    setProjectCost(initialData.projectCost || "");
+    setCadtStatus(initialData.cadtStatus || initialData.cadt || "");
+    setLocation(initialData.location || "");
+    setYearApproved(initialData.yearApproved || initialData.year || "");
+    setMoaDuration(initialData.moaDuration || initialData.moa_duration || "");
+    setCommunityBenefits(initialData.communityBenefits || initialData.community_benefits || "");
+    
     setErrors({});
 
     setTimeout(() => setIsHydrating(false), 0);
@@ -469,11 +496,20 @@ export default function MappingForm({
 
   const validate = () => {
     const e = {};
-    if (!surveyNumber.trim()) e.surveyNumber = "Survey Number is required";
-    if (!selectedRegionCode) e.region = "Region is required";
-    if (!selectedProvinceCode) e.province = "Province is required";
-    if (!selectedMunicipalityCodes || selectedMunicipalityCodes.size === 0) e.municipalities = "At least one municipality is required";
-    if (!selectedBarangayCodes || selectedBarangayCodes.size === 0) e.barangays = "At least one barangay is required";
+    
+    if (isInventoryUser) {
+      // NCIP validation
+      if (!controlNumber.trim()) e.controlNumber = "Control Number is required";
+      if (!selectedRegionCode) e.region = "Region is required";
+    } else {
+      // Regular user validation
+      if (!surveyNumber.trim()) e.surveyNumber = "Survey Number is required";
+      if (!selectedRegionCode) e.region = "Region is required";
+      if (!selectedProvinceCode) e.province = "Province is required";
+      if (!selectedMunicipalityCodes || selectedMunicipalityCodes.size === 0) e.municipalities = "At least one municipality is required";
+      if (!selectedBarangayCodes || selectedBarangayCodes.size === 0) e.barangays = "At least one barangay is required";
+    }
+    
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -486,40 +522,57 @@ export default function MappingForm({
 
     const regionName = regionMap.get(String(selectedRegionCode)) || selectedRegionCode || "";
     
-    // Handle province - could be from list or custom
-    const provinceName = provinceMap.get(String(selectedProvinceCode)) || selectedProvinceCode || "";
-    
-    // Handle municipalities - could be from list or custom
-    const municipalityNames = Array.from(selectedMunicipalityCodes)
-      .map((c) => municipalityMap.get(String(c)) || c)
-      .filter(Boolean)
-      .sort();
-    
-    // Handle barangays - could be from list or custom
-    const barangayNames = Array.from(selectedBarangayCodes)
-      .map((c) => barangayMap.get(String(c)) || c)
-      .filter(Boolean)
-      .sort();
-      
-    const iccIpNames = Array.from(selectedIccIpCodes);
-
     try {
-      await onSubmit({
-        surveyNumber: surveyNumber.trim(),
-        region: regionName,
-        province: provinceName,
-        municipalities: municipalityNames,
-        barangays: barangayNames,
-        icc: iccIpNames,
-        remarks: remarks.trim(),
-        totalArea: parseTotalArea(totalArea),
-      });
+      if (isInventoryUser) {
+        // NCIP user submission
+        const iccIpNames = Array.from(selectedIccIpCodes);
+        await onSubmit({
+          surveyNumber: surveyNumber.trim(),
+          controlNumber: controlNumber.trim(),
+          region: regionName,
+          applicantProponent: applicantProponent.trim(),
+          nameOfProject: nameOfProject.trim(),
+          natureOfProject: natureOfProject.trim(),
+          projectCost: projectCost.trim(),
+          cadtStatus: cadtStatus.trim(),
+          icc: iccIpNames,
+          location: location.trim(),
+          yearApproved: yearApproved.trim(),
+          moaDuration: moaDuration.trim(),
+          communityBenefits: communityBenefits.trim(),
+          remarks: remarks.trim(),
+        });
+      } else {
+        // Regular user submission
+        const provinceName = provinceMap.get(String(selectedProvinceCode)) || selectedProvinceCode || "";
+        const municipalityNames = Array.from(selectedMunicipalityCodes)
+          .map((c) => municipalityMap.get(String(c)) || c)
+          .filter(Boolean)
+          .sort();
+        const barangayNames = Array.from(selectedBarangayCodes)
+          .map((c) => barangayMap.get(String(c)) || c)
+          .filter(Boolean)
+          .sort();
+        const iccIpNames = Array.from(selectedIccIpCodes);
+
+        await onSubmit({
+          surveyNumber: surveyNumber.trim(),
+          region: regionName,
+          province: provinceName,
+          municipalities: municipalityNames,
+          barangays: barangayNames,
+          icc: iccIpNames,
+          remarks: remarks.trim(),
+          totalArea: parseTotalArea(totalArea),
+        });
+      }
 
       if (!isModal) {
         setAlertTick((t) => t + 1);
         setAlert({ type: "success", message: "Mapping saved successfully." });
       }
 
+      // Reset form
       setSurveyNumber("");
       setTotalArea("");
       setRemarks("");
@@ -528,6 +581,16 @@ export default function MappingForm({
       setSelectedMunicipalityCodes(new Set());
       setSelectedBarangayCodes(new Set());
       setSelectedIccIpCodes(new Set());
+      setControlNumber("");
+      setApplicantProponent("");
+      setNameOfProject("");
+      setNatureOfProject("");
+      setProjectCost("");
+      setCadtStatus("");
+      setLocation("");
+      setYearApproved("");
+      setMoaDuration("");
+      setCommunityBenefits("");
       setErrors({});
 
       if (isModal) {
@@ -600,120 +663,223 @@ export default function MappingForm({
           <form onSubmit={handleSave} className="flex-1 flex flex-col min-h-0">
             <div className="flex-1 overflow-y-auto overflow-x-hidden hide-scrollbar p-4 sm:p-7 pb-28 sm:pb-24">
               <div className="space-y-6">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block font-semibold text-[#0A2D55] mb-2">Survey Number <span className="text-red-500">*</span></label>
-                  <input value={surveyNumber} onChange={(e) => setSurveyNumber(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="e.g. ADO-2024-001" />
-                  {errors.surveyNumber && <p className="text-red-500 text-xs mt-1">{errors.surveyNumber}</p>}
-                </div>
-                <div>
-                  <label className="block font-semibold text-[#0A2D55] mb-2">Total Area (hectares)</label>
-                  <input 
-                    value={totalArea} 
-                    onChange={(e) => handleTotalAreaChange(e.target.value)} 
-                    className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" 
-                    placeholder="e.g. 1,234.56" 
-                    type="text"
-                  />
-                  {totalArea && (
-                    <p className="text-xs text-[#0A2D55]/60 mt-1">
-                      {parseTotalArea(totalArea).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ha
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-semibold text-[#0A2D55] mb-2">ICC/IP Community</label>
-                <SearchableSelect
-                  options={ICC_IP_OPTIONS.map((name) => ({ code: name, name }))}
-                  selected={selectedIccIpCodes}
-                  onChange={(s) => setSelectedIccIpCodes(s)}
-                  placeholder="Select ICC/IP"
-                  multi={true}
-                  summaryLabels={{ singular: "group", plural: "groups" }}
-                  allowCustom={true}
-                />
-                {selectedIccIpCodes.size > 0 && (
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {Array.from(selectedIccIpCodes).map((code) => (
-                      <span key={code} className="inline-flex items-center gap-1.5 bg-[#0C3B6E] text-white px-3 py-1.5 rounded-full text-xs">
-                        {code}
-                      </span>
-                    ))}
+              {isInventoryUser ? (
+                <>
+                  {/* NCIP Inventory User Form */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block font-semibold text-[#0A2D55] mb-2">No. (Survey Number)</label>
+                      <input value={surveyNumber} onChange={(e) => setSurveyNumber(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="e.g. ADO-2024-001" />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-[#0A2D55] mb-2">Region <span className="text-red-500">*</span></label>
+                      <SearchableSelect options={regions} selected={selectedRegionCode} onChange={(c) => setSelectedRegionCode(c)} placeholder="Select region" />
+                      {errors.region && <p className="text-red-500 text-xs mt-1">{errors.region}</p>}
+                    </div>
                   </div>
-                )}
-              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block font-semibold text-[#0A2D55] mb-2">Region <span className="text-red-500">*</span></label>
-                  <SearchableSelect options={regions} selected={selectedRegionCode} onChange={(c) => setSelectedRegionCode(c)} placeholder="Select region" />
-                  {errors.region && <p className="text-red-500 text-xs mt-1">{errors.region}</p>}
-                </div>
-                <div>
-                  <label className="block font-semibold text-[#0A2D55] mb-2">Province <span className="text-red-500">*</span></label>
-                  <SearchableSelect 
-                    options={provinces.map((p) => ({ code: p.code, name: p.name }))} 
-                    selected={selectedProvinceCode} 
-                    onChange={(c) => setSelectedProvinceCode(c)} 
-                    placeholder="Select or type province" 
-                    disabled={!selectedRegionCode}
-                    allowCustom={true}
-                  />
-                  {errors.province && <p className="text-red-500 text-xs mt-1">{errors.province}</p>}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block font-semibold text-[#0A2D55] mb-2">Municipalities <span className="text-red-500">*</span></label>
-                  <SearchableSelect 
-                    options={municipalities.map((m) => ({ code: m.code, name: m.name }))} 
-                    selected={selectedMunicipalityCodes} 
-                    onChange={(s) => setSelectedMunicipalityCodes(s)} 
-                    placeholder="Select or type municipalities" 
-                    multi={true} 
-                    disabled={!selectedProvinceCode} 
-                    summaryLabels={{ singular: "municipality", plural: "municipalities" }}
-                    allowCustom={true}
-                  />
-                  {errors.municipalities && <p className="text-red-500 text-xs mt-1">{errors.municipalities}</p>}
-                  {selectedMunicipalityCodes.size > 0 && (
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {Array.from(selectedMunicipalityCodes).map((code) => (
-                        <span key={code} className="inline-flex items-center gap-1.5 bg-[#0A2D55]/10 text-[#0A2D55] px-3 py-1.5 rounded-full text-xs">{municipalityMap.get(String(code)) || code}</span>
-                      ))}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block font-semibold text-[#0A2D55] mb-2">Control Number <span className="text-red-500">*</span></label>
+                      <input value={controlNumber} onChange={(e) => setControlNumber(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="e.g. CADT-2024-001" />
+                      {errors.controlNumber && <p className="text-red-500 text-xs mt-1">{errors.controlNumber}</p>}
                     </div>
-                  )}
-                </div>
-                <div>
-                  <label className="block font-semibold text-[#0A2D55] mb-2">Barangays <span className="text-red-500">*</span></label>
-                  <SearchableSelect 
-                    options={barangays.map((b) => ({ code: b.code, name: b.name }))} 
-                    selected={selectedBarangayCodes} 
-                    onChange={(s) => setSelectedBarangayCodes(s)} 
-                    placeholder="Select or type barangays" 
-                    multi={true} 
-                    disabled={selectedMunicipalityCodes.size === 0} 
-                    summaryLabels={{ singular: "barangay", plural: "barangays" }}
-                    allowCustom={true}
-                  />
-                  {errors.barangays && <p className="text-red-500 text-xs mt-1">{errors.barangays}</p>}
-                  {selectedBarangayCodes.size > 0 && (
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {Array.from(selectedBarangayCodes).map((code) => (
-                        <span key={code} className="inline-flex items-center gap-1.5 bg-[#F2C94C]/20 text-[#8B6F1C] px-3 py-1.5 rounded-full text-xs">{barangayMap.get(String(code)) || code}</span>
-                      ))}
+                    <div>
+                      <label className="block font-semibold text-[#0A2D55] mb-2">Proponent</label>
+                      <input value={applicantProponent} onChange={(e) => setApplicantProponent(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="Enter proponent name" />
                     </div>
-                  )}
-                </div>
-              </div>
+                  </div>
 
-              <div>
-                <label className="block font-semibold text-[#0A2D55] mb-2">Remarks</label>
-                <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
-              </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block font-semibold text-[#0A2D55] mb-2">Name of Project</label>
+                      <input value={nameOfProject} onChange={(e) => setNameOfProject(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="Enter project name" />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-[#0A2D55] mb-2">Location</label>
+                      <input value={location} onChange={(e) => setLocation(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="Enter location" />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block font-semibold text-[#0A2D55] mb-2">Nature of Project</label>
+                      <input value={natureOfProject} onChange={(e) => setNatureOfProject(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="Enter project nature" />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-[#0A2D55] mb-2">Project Cost</label>
+                      <input value={projectCost} onChange={(e) => setProjectCost(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="e.g. ₱1,000,000" />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block font-semibold text-[#0A2D55] mb-2">CADT Status</label>
+                      <input value={cadtStatus} onChange={(e) => setCadtStatus(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="Enter CADT status" />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-[#0A2D55] mb-2">Affected ICC</label>
+                      <SearchableSelect
+                        options={ICC_IP_OPTIONS.map((name) => ({ code: name, name }))}
+                        selected={selectedIccIpCodes}
+                        onChange={(s) => setSelectedIccIpCodes(s)}
+                        placeholder="Select affected ICC/IP"
+                        multi={true}
+                        summaryLabels={{ singular: "group", plural: "groups" }}
+                        allowCustom={true}
+                      />
+                      {selectedIccIpCodes.size > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          {Array.from(selectedIccIpCodes).map((code) => (
+                            <span key={code} className="inline-flex items-center gap-1.5 bg-[#0C3B6E] text-white px-3 py-1.5 rounded-full text-xs">
+                              {code}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block font-semibold text-[#0A2D55] mb-2">Year Approved</label>
+                      <input value={yearApproved} onChange={(e) => setYearApproved(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="e.g. 2024" />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-[#0A2D55] mb-2">MOA Duration</label>
+                      <input value={moaDuration} onChange={(e) => setMoaDuration(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="e.g. 25 years" />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-[#0A2D55] mb-2">Community Benefits</label>
+                    <textarea value={communityBenefits} onChange={(e) => setCommunityBenefits(e.target.value)} rows={3} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="Describe community benefits" />
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-[#0A2D55] mb-2">Remarks</label>
+                    <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* Regular User Form */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block font-semibold text-[#0A2D55] mb-2">Survey Number <span className="text-red-500">*</span></label>
+                      <input value={surveyNumber} onChange={(e) => setSurveyNumber(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="e.g. ADO-2024-001" />
+                      {errors.surveyNumber && <p className="text-red-500 text-xs mt-1">{errors.surveyNumber}</p>}
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-[#0A2D55] mb-2">Total Area (hectares)</label>
+                      <input 
+                        value={totalArea} 
+                        onChange={(e) => handleTotalAreaChange(e.target.value)} 
+                        className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" 
+                        placeholder="e.g. 1,234.56" 
+                        type="text"
+                      />
+                      {totalArea && (
+                        <p className="text-xs text-[#0A2D55]/60 mt-1">
+                          {parseTotalArea(totalArea).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ha
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-[#0A2D55] mb-2">ICC/IP Community</label>
+                    <SearchableSelect
+                      options={ICC_IP_OPTIONS.map((name) => ({ code: name, name }))}
+                      selected={selectedIccIpCodes}
+                      onChange={(s) => setSelectedIccIpCodes(s)}
+                      placeholder="Select ICC/IP"
+                      multi={true}
+                      summaryLabels={{ singular: "group", plural: "groups" }}
+                      allowCustom={true}
+                    />
+                    {selectedIccIpCodes.size > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {Array.from(selectedIccIpCodes).map((code) => (
+                          <span key={code} className="inline-flex items-center gap-1.5 bg-[#0C3B6E] text-white px-3 py-1.5 rounded-full text-xs">
+                            {code}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block font-semibold text-[#0A2D55] mb-2">Region <span className="text-red-500">*</span></label>
+                      <SearchableSelect options={regions} selected={selectedRegionCode} onChange={(c) => setSelectedRegionCode(c)} placeholder="Select region" />
+                      {errors.region && <p className="text-red-500 text-xs mt-1">{errors.region}</p>}
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-[#0A2D55] mb-2">Province <span className="text-red-500">*</span></label>
+                      <SearchableSelect 
+                        options={provinces.map((p) => ({ code: p.code, name: p.name }))} 
+                        selected={selectedProvinceCode} 
+                        onChange={(c) => setSelectedProvinceCode(c)} 
+                        placeholder="Select or type province" 
+                        disabled={!selectedRegionCode}
+                        allowCustom={true}
+                      />
+                      {errors.province && <p className="text-red-500 text-xs mt-1">{errors.province}</p>}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block font-semibold text-[#0A2D55] mb-2">Municipalities <span className="text-red-500">*</span></label>
+                      <SearchableSelect 
+                        options={municipalities.map((m) => ({ code: m.code, name: m.name }))} 
+                        selected={selectedMunicipalityCodes} 
+                        onChange={(s) => setSelectedMunicipalityCodes(s)} 
+                        placeholder="Select or type municipalities" 
+                        multi={true} 
+                        disabled={!selectedProvinceCode} 
+                        summaryLabels={{ singular: "municipality", plural: "municipalities" }}
+                        allowCustom={true}
+                      />
+                      {errors.municipalities && <p className="text-red-500 text-xs mt-1">{errors.municipalities}</p>}
+                      {selectedMunicipalityCodes.size > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          {Array.from(selectedMunicipalityCodes).map((code) => (
+                            <span key={code} className="inline-flex items-center gap-1.5 bg-[#0A2D55]/10 text-[#0A2D55] px-3 py-1.5 rounded-full text-xs">{municipalityMap.get(String(code)) || code}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-[#0A2D55] mb-2">Barangays <span className="text-red-500">*</span></label>
+                      <SearchableSelect 
+                        options={barangays.map((b) => ({ code: b.code, name: b.name }))} 
+                        selected={selectedBarangayCodes} 
+                        onChange={(s) => setSelectedBarangayCodes(s)} 
+                        placeholder="Select or type barangays" 
+                        multi={true} 
+                        disabled={selectedMunicipalityCodes.size === 0} 
+                        summaryLabels={{ singular: "barangay", plural: "barangays" }}
+                        allowCustom={true}
+                      />
+                      {errors.barangays && <p className="text-red-500 text-xs mt-1">{errors.barangays}</p>}
+                      {selectedBarangayCodes.size > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          {Array.from(selectedBarangayCodes).map((code) => (
+                            <span key={code} className="inline-flex items-center gap-1.5 bg-[#F2C94C]/20 text-[#8B6F1C] px-3 py-1.5 rounded-full text-xs">{barangayMap.get(String(code)) || code}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-[#0A2D55] mb-2">Remarks</label>
+                    <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
+                  </div>
+                </>
+              )}
               </div>
             </div>
 

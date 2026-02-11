@@ -146,7 +146,7 @@ export function LoginPage({ onLogin }) {
                 </div>
                 <div className="min-w-0">
                   <h1 className="text-2xl sm:text-3xl font-bold text-white leading-tight text-balance">
-                    ADO Mapping Inventory System
+                    {String(username || '').toLowerCase().includes('ncip') ? 'CP Inventory System' : 'ADO Mapping Inventory System'}
                   </h1>
                   <p className="mt-1 text-sm sm:text-[15px] text-white/75 text-balance">
                     Indigenous Cultural Communities Mapping Management System
@@ -217,7 +217,7 @@ export function LoginPage({ onLogin }) {
 
               {/* Footer */}
               <div className="mt-6 pt-4 border-t border-white/15 text-center text-[11px] sm:text-xs text-white/70">
-                <span className="font-medium">NCIP ADO Mapping Inventory System</span>{' '}
+                <span className="font-medium">{String(username || '').toLowerCase().includes('ncip') ? 'NCIP CP Inventory System' : 'NCIP ADO Mapping Inventory System'}</span>{' '}
                 <span className="whitespace-nowrap">© 2026</span>
               </div>
             </div>

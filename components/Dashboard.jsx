@@ -181,14 +181,16 @@ export function Dashboard({
     'No.',
     'Region',
     'Control number',
-    'Applicant/Proponent',
+    'Proponent',
     'Name of Project',
+    'Location',
     'Nature of Project',
     'Project Cost',
     'CADT Status',
-    'ICC',
-    'Location',
+    'Affected ICC',
     'Year Approved',
+    'MOA Duration',
+    'Community Benefits',
     'Remarks',
   ];
   const DEFAULT_TABLE_HEADERS = ['SURVEY NUMBER', 'REGION', 'PROVINCE', 'MUNICIPALITY/IES', 'BARANGAY/S', 'AREA (HA)', 'ICCS/IPS', 'REMARKS', 'ACTIONS'];
@@ -197,22 +199,36 @@ export function Dashboard({
 
   const renderCellForHeader = (mapping, header) => {
     const h = String(header || '').toLowerCase();
-    if (h === 'no.' || h === 'survey number') return mapping.surveyNumber || mapping.controlNumber || '-';
-    if (h === 'region') return mapping.region || '-';
-    if (h === 'control number') return mapping.controlNumber || mapping.surveyNumber || '-';
-    if (h.includes('applicant') || h.includes('proponent')) return mapping.applicant || mapping.proponent || mapping.applicantProponent || '-';
-    if (h.includes('name of project') || h.includes('name')) return mapping.nameOfProject || mapping.projectName || '-';
-    if (h.includes('nature')) return mapping.nature || mapping.natureOfProject || '-';
-    if (h.includes('project cost') || h.includes('cost')) return mapping.projectCost || '-';
-    if (h.includes('cadt')) return mapping.cadtStatus || mapping.cadt || '-';
-    if (h === 'icc' || h.includes('icc')) return (mapping.icc && mapping.icc.length) ? mapping.icc.join(', ') : '-';
-    if (h === 'location') return mapping.location || mapping.province || '-';
-    if (h.includes('year')) return mapping.yearApproved || mapping.year || '-';
-    if (h.includes('province')) return mapping.province || '-';
-    if (h.includes('municipality')) return mapping.municipality || (Array.isArray(mapping.municipalities) ? mapping.municipalities.join(', ') : '-') || '-';
-    if (h.includes('barangay')) return mapping.barangays || (Array.isArray(mapping.barangays) ? mapping.barangays.join(', ') : '-') || '-';
-    if (h.includes('area')) return mapping.totalArea?.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 }) || '-';
-    if (h.includes('remark')) return mapping.remarks || '-';
+
+    const getField = (keys) => {
+      for (const k of keys) {
+        if (!k) continue;
+        const val = mapping[k];
+        if (val === null || typeof val === 'undefined' || val === '') continue;
+        if (Array.isArray(val)) return val.length ? val.join(', ') : null;
+        return String(val);
+      }
+      return null;
+    };
+
+    if (h === 'no.' || h === 'survey number') return getField(['surveyNumber', 'survey_number', 'controlNumber', 'control_number']) || '-';
+    if (h === 'region') return getField(['region', 'regionName', 'region_name']) || '-';
+    if (h === 'control number') return getField(['controlNumber', 'control_number', 'surveyNumber', 'survey_number']) || '-';
+    if (h.includes('applicant') || h.includes('proponent')) return getField(['proponent', 'applicantProponent', 'applicant_proponent', 'applicant', 'applicant_name', 'applicantName']) || '-';
+    if (h.includes('name of project') || (h.includes('name') && !h.includes('region'))) return getField(['nameOfProject', 'name_of_project', 'projectName', 'project_name', 'name', 'title']) || '-';
+    if (h.includes('nature')) return getField(['natureOfProject', 'nature_of_project', 'nature', 'projectNature']) || '-';
+    if (h.includes('project cost') || h.includes('cost')) return getField(['projectCost', 'project_cost', 'cost', 'project_cost_php']) || '-';
+    if (h.includes('cadt')) return getField(['cadtStatus', 'cadt_status', 'cadt']) || '-';
+    if (h === 'icc' || h.includes('icc')) return getField(['icc', 'iccs', 'affectedICC', 'affected_icc', 'affected_iccs']) || '-';
+    if (h === 'location') return getField(['location', 'province', 'provinceName', 'province_name', 'location_full']) || '-';
+    if (h.includes('year')) return getField(['yearApproved', 'year_approved', 'year', 'approvedYear']) || '-';
+    if (h.includes('moa duration') || h === 'moa duration') return getField(['moaDuration', 'moa_duration', 'moa']) || '-';
+    if (h.includes('province')) return getField(['province', 'provinceName', 'province_name']) || '-';
+    if (h.includes('municipality')) return getField(['municipality', 'municipalities']) || '-';
+    if (h.includes('barangay')) return getField(['barangays']) || '-';
+    if (h.includes('area')) return getField(['totalArea', 'area', 'area_ha']) || '-';
+    if (h.includes('community')) return getField(['communityBenefits', 'community_benefits', 'community']) || '-';
+    if (h.includes('remark')) return getField(['remarks', 'remark', 'notes']) || '-';
     return '-';
   };
 
@@ -635,22 +651,44 @@ export function Dashboard({
   };
 
   const buildExportWorkbook = () => {
-    const headers = ['Survey Number', 'Province', 'Municipality', 'Barangays', 'Total Area', 'ICC', 'Remarks', 'Sheet'];
+    const headers = isInventoryUser
+      ? [...NCIP_TABLE_HEADERS, 'Sheet']
+      : ['Survey Number', 'Province', 'Municipality', 'Barangays', 'Total Area', 'ICC', 'Remarks', 'Sheet'];
     const rowsBySheet = new globalThis.Map();
 
     mappings.forEach((m) => {
       const sheet = detectRegionSheet(m.region) || 'Unknown';
       const rows = rowsBySheet.get(sheet) || [];
-      rows.push([
-        m.surveyNumber || '',
-        m.province || '',
-        formatMunicipalitiesExport(m) || '',
-        formatBarangaysExport(m) || '',
-        m.totalArea || '',
-        m.icc?.join('; ') || '',
-        m.remarks || '',
-        sheet,
-      ]);
+      if (isInventoryUser) {
+        rows.push([
+          m.surveyNumber || m.controlNumber || '',
+          m.region || '',
+          m.controlNumber || m.surveyNumber || '',
+          m.proponent || m.applicant || m.applicantProponent || '',
+          m.nameOfProject || m.projectName || '',
+          m.location || m.province || '',
+          m.natureOfProject || m.nature || '',
+          m.projectCost || '',
+          m.cadtStatus || m.cadt || '',
+          (m.icc && m.icc.length) ? m.icc.join('; ') : '',
+          m.yearApproved || m.year || '',
+          m.moaDuration || m.moa_duration || '',
+          m.communityBenefits || '',
+          m.remarks || '',
+          sheet,
+        ]);
+      } else {
+        rows.push([
+          m.surveyNumber || '',
+          m.province || '',
+          formatMunicipalitiesExport(m) || '',
+          formatBarangaysExport(m) || '',
+          m.totalArea || '',
+          m.icc?.join('; ') || '',
+          m.remarks || '',
+          sheet,
+        ]);
+      }
       rowsBySheet.set(sheet, rows);
     });
 
@@ -805,9 +843,21 @@ export function Dashboard({
   };
 
   // Calculate statistics
+  const parseProjectCost = (v) => {
+    if (v === null || v === undefined || v === '') return 0;
+    const cleaned = String(v).replace(/[^0-9.-]+/g, '');
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const totalProjectCostNumber = mappings.reduce((sum, m) => {
+    return sum + parseProjectCost(m.projectCost || m.project_cost || m.cost || 0);
+  }, 0);
+
   const stats = {
     totalMappings: mappings.length,
-    totalArea: mappings.reduce((sum, m) => sum + (m.totalArea || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+    totalProjectCost: totalProjectCostNumber,
+    totalProjectCostFormatted: (totalProjectCostNumber === 0) ? '0.00' : `₱${totalProjectCostNumber.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
     regions: new Set(mappings.map((m) => m.region)).size,
   };
 
@@ -1062,10 +1112,12 @@ export function Dashboard({
               />
             </div>
             <div className="min-w-0">
-              <h1 className="text-base sm:text-2xl md:text-[1.6rem] font-bold truncate tracking-tight">ADO Mapping Inventory System</h1>
-              <p className="text-xs sm:text-sm text-white/80 truncate mt-0.5">
-                {user?.role ? (user.role.charAt(0).toUpperCase() + user.role.slice(1)) : 'User'} • {user?.email || user?.username || 'Unknown'}
-              </p>
+              <h1 className="text-base sm:text-2xl md:text-[1.6rem] font-bold truncate tracking-tight">CP Inventory System</h1>
+              {!isInventoryUser && (
+                <p className="text-xs sm:text-sm text-white/80 truncate mt-0.5">
+                  {user?.role ? (user.role.charAt(0).toUpperCase() + user.role.slice(1)) : 'User'} • {user?.email || user?.username || 'Unknown'}
+                </p>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -1206,7 +1258,21 @@ export function Dashboard({
               }`}
             >
               <MapIcon size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-              <span>Mappings</span>
+              <span>Approved</span>
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab('ongoing');
+                setMobileMenuOpen(false);
+              }}
+              className={`flex-1 min-w-0 sm:flex-none px-3 sm:px-5 py-3 sm:py-3.5 font-medium text-xs sm:text-base border-b-2 transition whitespace-nowrap flex items-center justify-center gap-1.5 sm:gap-2 ${
+                activeTab === 'ongoing'
+                  ? 'border-[#F2C94C] text-[#0A2D55] bg-[#F2C94C]/10'
+                  : 'border-transparent text-[#0A2D55]/70 hover:text-[#0A2D55] hover:bg-[#0A2D55]/5'
+              }`}
+            >
+              <Bell size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
+              <span>Ongoing</span>
             </button>
           </div>
         </nav>
@@ -1233,12 +1299,11 @@ export function Dashboard({
               <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-4 sm:p-6 border-l-4 border-[#F2C94C] hover:shadow-xl transition animate-section-1">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <p className="text-[#0A2D55]/70 text-xs sm:text-sm font-medium truncate">Total Mapped Area</p>
-                    <p className="text-2xl sm:text-4xl font-bold text-[#0C3B6E] mt-1 sm:mt-2">{stats.totalArea}</p>
-                    <p className="text-xs text-[#0A2D55]/60 mt-1">hectares</p>
+                    <p className="text-[#0A2D55]/70 text-xs sm:text-sm font-medium truncate">Total Project Cost</p>
+                    <p className="text-2xl sm:text-4xl font-bold text-[#0C3B6E] mt-1 sm:mt-2">{stats.totalProjectCostFormatted}</p>
                   </div>
                   <div className="w-11 h-11 sm:w-12 sm:h-12 bg-[#F2C94C]/20 rounded-xl flex items-center justify-center flex-shrink-0">
-                    <Layers className="w-5 h-5 sm:w-6 sm:h-6 text-[#0C3B6E]" />
+                    <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6 text-[#0C3B6E]" />
                   </div>
                 </div>
               </div>
@@ -1262,7 +1327,7 @@ export function Dashboard({
         {activeTab === 'mappings' && (
           <div className="animate-section-1">
             <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 animate-header">
-              <h2 className="text-lg sm:text-2xl font-bold text-[#0A2D55]">All Mappings</h2>
+              <h2 className="text-lg sm:text-2xl font-bold text-[#0A2D55]">CP Application</h2>
               <div className="w-full sm:w-auto flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                 <div className="w-full sm:w-[320px] flex items-center gap-2 bg-white border-2 border-[#0A2D55]/10 rounded-xl px-4 py-2.5 hover:border-[#F2C94C]/40 focus-within:border-[#F2C94C] focus-within:ring-2 focus-within:ring-[#F2C94C]/40 transition-all shadow-sm hover:shadow-md">
                   <Search size={18} className="text-[#0A2D55]/40 flex-shrink-0" />
@@ -1534,6 +1599,20 @@ export function Dashboard({
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {activeTab === 'ongoing' && (
+          <div className="animate-section-1">
+            <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 animate-header">
+              <h2 className="text-lg sm:text-2xl font-bold text-[#0A2D55]">Ongoing</h2>
+              <div className="w-full sm:w-auto flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                <p className="text-sm text-[#0A2D55]/70">Placeholder for ongoing items. Customize as needed.</p>
+              </div>
+            </div>
+            <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-6">
+              <p className="text-sm text-[#0A2D55]/60">No ongoing items yet.</p>
+            </div>
           </div>
         )}
       </main>

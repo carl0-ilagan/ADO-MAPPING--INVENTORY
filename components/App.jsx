@@ -343,6 +343,7 @@ export function App() {
           : (record.barangays ? String(record.barangays).split(',').map((v) => v.trim()).filter(Boolean) : []);
 
         const newMapping = {
+          ...record, // Preserve ALL fields from imported record (including NCIP fields)
           userId: currentUser.uid,
           surveyNumber,
           region: record.region || '',
@@ -510,6 +511,7 @@ export function App() {
         primaryChildren={
           <MappingForm
             isModal
+            user={currentUser}
             onBack={() => setShowAddMappingModal(false)}
             onSubmit={handleFormSubmit}
             initialData={editingMapping}
