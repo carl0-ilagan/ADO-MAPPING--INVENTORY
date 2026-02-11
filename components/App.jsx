@@ -135,6 +135,18 @@ export function App() {
         icc: formData.icc || [],
         remarks: formData.remarks || '',
         totalArea: formData.totalArea || 0,
+        // NCIP-specific fields
+        controlNumber: formData.controlNumber || '',
+        applicantProponent: formData.applicantProponent || '',
+        proponent: formData.applicantProponent || '', // alias for compatibility
+        nameOfProject: formData.nameOfProject || '',
+        natureOfProject: formData.natureOfProject || '',
+        projectCost: formData.projectCost || '',
+        cadtStatus: formData.cadtStatus || '',
+        location: formData.location || '',
+        yearApproved: formData.yearApproved || '',
+        moaDuration: formData.moaDuration || '',
+        communityBenefits: formData.communityBenefits || '',
       };
 
       if (editingMapping?.id) {

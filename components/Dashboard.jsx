@@ -1948,40 +1948,107 @@ export function Dashboard({
 
               <div className="px-4 sm:px-6 py-4 sm:py-5 text-white/90 overflow-y-auto flex-1">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-xs font-semibold text-white/70">Survey Number</p>
-                    <p className="text-white font-semibold mt-1">{selectedMapping.surveyNumber || '-'}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold text-white/70">Total Area (ha)</p>
-                    <p className="text-white font-mono mt-1">
-                      {selectedMapping.totalArea?.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 }) || '-'}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold text-white/70">Region</p>
-                    <p className="text-white mt-1">{selectedMapping.region || '-'}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold text-white/70">Province</p>
-                    <p className="text-white mt-1">{selectedMapping.province || '-'}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold text-white/70">Municipality/ies</p>
-                    <p className="text-white mt-1">{getMunicipalitiesFull(selectedMapping) || '-'}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold text-white/70">Barangay/s</p>
-                    <p className="text-white mt-1">{getBarangaysFull(selectedMapping) || '-'}</p>
-                  </div>
-                  <div className="sm:col-span-2">
-                    <p className="text-xs font-semibold text-white/70">ICCs/IPs</p>
-                    <p className="text-white mt-1">{selectedMapping.icc?.join(', ') || '-'}</p>
-                  </div>
-                  <div className="sm:col-span-2">
-                    <p className="text-xs font-semibold text-white/70">Remarks</p>
-                    <p className="text-white mt-1">{selectedMapping.remarks || '-'}</p>
-                  </div>
+                  {isInventoryUser ? (
+                    <>
+                      {/* NCIP Inventory User View */}
+                      <div>
+                        <p className="text-xs font-semibold text-white/70">No. (Survey Number)</p>
+                        <p className="text-white font-semibold mt-1">{selectedMapping.surveyNumber || '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-white/70">Region</p>
+                        <p className="text-white mt-1">{selectedMapping.region || '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-white/70">Control Number</p>
+                        <p className="text-white font-semibold mt-1">{selectedMapping.controlNumber || '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-white/70">Proponent</p>
+                        <p className="text-white mt-1">{selectedMapping.applicantProponent || selectedMapping.proponent || '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-white/70">Name of Project</p>
+                        <p className="text-white mt-1">{selectedMapping.nameOfProject || '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-white/70">Location</p>
+                        <p className="text-white mt-1">{selectedMapping.location || '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-white/70">Nature of Project</p>
+                        <p className="text-white mt-1">{selectedMapping.natureOfProject || '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-white/70">Project Cost</p>
+                        <p className="text-white mt-1">{selectedMapping.projectCost || '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-white/70">CADT Status</p>
+                        <p className="text-white mt-1">{selectedMapping.cadtStatus || '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-white/70">Affected ICC</p>
+                        <p className="text-white mt-1">{selectedMapping.icc?.join(', ') || '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-white/70">Year Approved</p>
+                        <p className="text-white mt-1">{selectedMapping.yearApproved || '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-white/70">MOA Duration</p>
+                        <p className="text-white mt-1">{selectedMapping.moaDuration || '-'}</p>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <p className="text-xs font-semibold text-white/70">Community Benefits</p>
+                        <p className="text-white mt-1">{selectedMapping.communityBenefits || '-'}</p>
+                      </div>
+                      {selectedMapping.remarks && (
+                        <div className="sm:col-span-2">
+                          <p className="text-xs font-semibold text-white/70">Remarks</p>
+                          <p className="text-white mt-1">{selectedMapping.remarks}</p>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {/* Regular User View */}
+                      <div>
+                        <p className="text-xs font-semibold text-white/70">Survey Number</p>
+                        <p className="text-white font-semibold mt-1">{selectedMapping.surveyNumber || '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-white/70">Total Area (ha)</p>
+                        <p className="text-white font-mono mt-1">
+                          {selectedMapping.totalArea?.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 }) || '-'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-white/70">Region</p>
+                        <p className="text-white mt-1">{selectedMapping.region || '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-white/70">Province</p>
+                        <p className="text-white mt-1">{selectedMapping.province || '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-white/70">Municipality/ies</p>
+                        <p className="text-white mt-1">{getMunicipalitiesFull(selectedMapping) || '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-white/70">Barangay/s</p>
+                        <p className="text-white mt-1">{getBarangaysFull(selectedMapping) || '-'}</p>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <p className="text-xs font-semibold text-white/70">ICCs/IPs</p>
+                        <p className="text-white mt-1">{selectedMapping.icc?.join(', ') || '-'}</p>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <p className="text-xs font-semibold text-white/70">Remarks</p>
+                        <p className="text-white mt-1">{selectedMapping.remarks || '-'}</p>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
 
