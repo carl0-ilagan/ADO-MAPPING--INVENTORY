@@ -345,6 +345,16 @@
   display: none;              /* Chrome, Safari, Edge */
 }
 
+/* Tailwind utility for hiding scrollbar */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 /* Apply to table wrapper and other scrollable containers */
 .scrollable-table {
   overflow-y: auto;

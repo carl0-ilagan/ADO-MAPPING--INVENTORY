@@ -16,6 +16,8 @@ import {
   Pencil,
   Trash2,
   Bell,
+  CheckCircle2,
+  Clock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -854,11 +856,23 @@ export function Dashboard({
     return sum + parseProjectCost(m.projectCost || m.project_cost || m.cost || 0);
   }, 0);
 
+  const approvedCount = mappings.filter(m => {
+    const status = String(m.cadtStatus || m.cadt_status || '').toLowerCase();
+    return status.includes('approved') || status.includes('registered') || status.includes('awarded');
+  }).length;
+
+  const ongoingCount = mappings.filter(m => {
+    const status = String(m.cadtStatus || m.cadt_status || '').toLowerCase();
+    return status.includes('on process') || status.includes('for processing') || status.includes('processing');
+  }).length;
+
   const stats = {
     totalMappings: mappings.length,
     totalProjectCost: totalProjectCostNumber,
     totalProjectCostFormatted: (totalProjectCostNumber === 0) ? '0.00' : `₱${totalProjectCostNumber.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
     regions: new Set(mappings.map((m) => m.region)).size,
+    approved: approvedCount,
+    ongoing: ongoingCount,
   };
 
   return (
@@ -1283,7 +1297,7 @@ export function Dashboard({
         {activeTab === 'overview' && (
           <div className="space-y-4 sm:space-y-6 animate-section-1">
             {/* Stats Cards — login palette: navy #0A2D55, #0C3B6E, gold #F2C94C */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-3 sm:gap-4 lg:gap-6">
               <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-4 sm:p-6 border-l-4 border-[#0A2D55] hover:shadow-xl hover:border-[#0C3B6E] transition animate-header">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
@@ -1299,8 +1313,8 @@ export function Dashboard({
               <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-4 sm:p-6 border-l-4 border-[#F2C94C] hover:shadow-xl transition animate-section-1">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <p className="text-[#0A2D55]/70 text-xs sm:text-sm font-medium truncate">Total Project Cost</p>
-                    <p className="text-2xl sm:text-4xl font-bold text-[#0C3B6E] mt-1 sm:mt-2">{stats.totalProjectCostFormatted}</p>
+                    <p className="text-[#0A2D55]/70 text-xs sm:text-sm font-medium mb-1">Total Project Cost</p>
+                    <p className="text-base sm:text-lg lg:text-xl xl:text-2xl font-bold text-[#0C3B6E] leading-tight">{stats.totalProjectCostFormatted}</p>
                   </div>
                   <div className="w-11 h-11 sm:w-12 sm:h-12 bg-[#F2C94C]/20 rounded-xl flex items-center justify-center flex-shrink-0">
                     <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6 text-[#0C3B6E]" />
@@ -1316,6 +1330,30 @@ export function Dashboard({
                   </div>
                   <div className="w-11 h-11 sm:w-12 sm:h-12 bg-[#0C3B6E]/15 rounded-xl flex items-center justify-center flex-shrink-0">
                     <MapPin className="w-5 h-5 sm:w-6 sm:h-6 text-[#0A2D55]" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-4 sm:p-6 border-l-4 border-green-600 hover:shadow-xl transition animate-section-1">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[#0A2D55]/70 text-xs sm:text-sm font-medium truncate">Approved</p>
+                    <p className="text-2xl sm:text-4xl font-bold text-green-700 mt-1 sm:mt-2">{stats.approved}</p>
+                  </div>
+                  <div className="w-11 h-11 sm:w-12 sm:h-12 bg-green-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <CheckCircle2 className="w-5 h-5 sm:w-6 sm:h-6 text-green-600" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-4 sm:p-6 border-l-4 border-orange-500 hover:shadow-xl transition animate-section-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[#0A2D55]/70 text-xs sm:text-sm font-medium truncate">Ongoing</p>
+                    <p className="text-2xl sm:text-4xl font-bold text-orange-600 mt-1 sm:mt-2">{stats.ongoing}</p>
+                  </div>
+                  <div className="w-11 h-11 sm:w-12 sm:h-12 bg-orange-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <Clock className="w-5 h-5 sm:w-6 sm:h-6 text-orange-500" />
                   </div>
                 </div>
               </div>
