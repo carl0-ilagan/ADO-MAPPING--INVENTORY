@@ -123,6 +123,7 @@ export function App() {
     try {
       const municipalities = formData.municipalities || [];
       const barangays = formData.barangays || [];
+
       const newMapping = {
         userId: currentUser.uid,
         surveyNumber: formData.surveyNumber || '',
@@ -137,21 +138,15 @@ export function App() {
       };
 
       if (editingMapping?.id) {
-        await updateMapping(editingMapping.id, {
-          ...newMapping,
-          location: '',
-        });
+        await updateMapping(editingMapping.id, { ...newMapping });
         setMappings(mappings.map((m) => (m.id === editingMapping.id ? { ...m, ...newMapping } : m)));
       } else {
-        const mappingId = await addMapping({
-          ...newMapping,
-          location: '',
-        });
-
+        const mappingId = await addMapping({ ...newMapping });
         // Update local state
         const updatedMappings = [...mappings, { id: mappingId, ...newMapping }];
         setMappings(updatedMappings);
       }
+
       setToastTick((t) => t + 1);
       setToast({ type: 'success', message: editingMapping ? 'Mapping updated successfully.' : 'Mapping saved successfully.' });
       setShowAddMappingModal(false);
@@ -360,15 +355,15 @@ export function App() {
         const existing = existingBySurvey.get(key);
 
         if (mode === 'newCollection') {
-          try {
-            const mappingId = await addMappingToCollection(targetCollection, { ...newMapping, location: '' });
+            try {
+            const mappingId = await addMappingToCollection(targetCollection, { ...newMapping });
             createdCount += 1;
           } catch (err) {
             // If permission denied for arbitrary collections, fall back to writing into 'mappings'
             const msg = String(err?.message || '').toLowerCase();
             if (msg.includes('permission') || msg.includes('missing') || msg.includes('insufficient')) {
               // write into main `mappings` collection with an importCollection tag so users can find them
-              const mappingId = await addMapping({ ...newMapping, location: '', importCollection: targetCollection });
+              const mappingId = await addMapping({ ...newMapping, importCollection: targetCollection });
               nextMappings.push({ id: mappingId, ...newMapping, importCollection: targetCollection });
               createdCount += 1;
               // flag will be surfaced after loop via toast (see below)
@@ -378,12 +373,12 @@ export function App() {
             }
           }
         } else if (existing?.id) {
-          await updateMapping(existing.id, { ...newMapping, location: '' });
+          await updateMapping(existing.id, { ...newMapping });
           const idx = nextMappings.findIndex((m) => m.id === existing.id);
           if (idx !== -1) nextMappings[idx] = { ...existing, ...newMapping };
           updatedCount += 1;
         } else {
-          const mappingId = await addMapping({ ...newMapping, location: '' });
+          const mappingId = await addMapping({ ...newMapping });
           nextMappings.push({ id: mappingId, ...newMapping });
           createdCount += 1;
         }
