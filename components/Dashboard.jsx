@@ -52,6 +52,7 @@ export function Dashboard({
   const [remarksFilter, setRemarksFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [fabOpen, setFabOpen] = useState(false);
+  const [ongoingSubTab, setOngoingSubTab] = useState('summary');
   
   const [showViewModal, setShowViewModal] = useState(false);
   const [isClosingViewModal, setIsClosingViewModal] = useState(false);
@@ -257,6 +258,288 @@ export function Dashboard({
     formatListFull(mapping.municipality || mapping.municipalities)
   );
 
+  // Ongoing subtabs configuration and helpers (moved out of JSX to avoid parsing issues)
+  const ONGOING_SUBTABS = [
+    { id: 'summary', label: 'Summary' },
+    { id: 'summary-per-project', label: 'Summary per project' },
+    { id: 'denied-by-mgb', label: 'Denied by MGB' },
+    { id: 'inactive', label: 'Inactive' },
+    { id: 'car', label: 'CAR' },
+    { id: 'region1', label: 'Region 1' },
+    { id: 'region2', label: 'Region 2' },
+    { id: 'region3', label: 'Region 3' },
+    { id: 'region4a', label: 'Region 4A' },
+    { id: 'region4b', label: 'Region 4B' },
+    { id: 'region5', label: 'Region 5' },
+    { id: 'region6-7', label: 'Region 6/7' },
+    { id: 'region8', label: 'Region 8' },
+    { id: 'region9', label: 'Region 9' },
+    { id: 'region10', label: 'Region 10' },
+    { id: 'region11', label: 'Region 11' },
+    { id: 'region12', label: 'Region 12' },
+    { id: 'region13', label: 'Region 13' },
+  ].map((s) => ({
+    ...s,
+    headers: s.id === 'denied-by-mgb' ? [
+      'Name of Proponent',
+      'Name of Project',
+      'Type of project',
+      'Project Location',
+      'Project Area (in hectares)',
+      'Affected Ancestral Domain/s',
+      'Affected ICCs/IPs',
+      'Date of Application',
+      'Review of Application Documents',
+      'Need for FBI?',
+      'Issuance of Work Order',
+      'Pre-FBI Conference',
+      'Approval/ Concurrence of WFP',
+      'Payment of FBI Fee',
+      'Conduct of FBI',
+      'Preparation of FBI Report',
+      'Review of FBI Report',
+      'Issuance of Work Order of FPIC Team',
+      'Pre-FPIC Conference',
+      'Approval of WFP',
+      'Payment of FPIC Fee',
+      'Posting of Notices',
+      '1st Community Assembly',
+      '2nd Community Assembly',
+      'Consensus Building & Decision Meeting',
+      'Proceed to MOA Negotiation?',
+      '(If yes) Issuance of Resolution to proceed to MOA Negotiation',
+      'MOA Negotiation & Preparation',
+      'MOA Validation, Ratification & Signing',
+      'Issuance of Resolution of Consent',
+      'Submission of FPIC Report',
+      'Review of the FPIC Report by RRT',
+      'Review of the FPIC Report by ADO & LAO',
+      'For compliance of FPIC Team/ RO',
+      'CEB Deliberation',
+      'CEB Approved?',
+      '(If yes) Preparation & Signing of CEB Resolution & CP',
+      'Release of CP to the Proponent',
+      'REMARKS'
+    ] : [
+      'Name of Proponent', 'Name of Project', 'Type of project', 'Project Location', 'Project Area (in hectares)', 'Affected Ancestral Domain/s', 'Affected ICCs/IPs', 'Date of Application', 'Review of Application Documents', 'Need for FBI?', 'Issuance of Work Order', 'Pre-FBI Conference', 'Approval/ Concurrence of WFP', 'Payment of FBI Fee', 'Conduct of FBI', 'Preparation of FBI Report', 'Review of FBI Report', 'Issuance of Work Order of FPIC Team', 'Pre-FPIC Conference', 'Approval of WFP', 'Payment of FPIC Fee', 'Posting of Notices', '1st Community Assembly', '2nd Community Assembly', 'Consensus Building & Decision Meeting', 'Proceed to MOA Negotiation?', '(If yes) Issuance of Resolution to proceed to MOA Negotiation', 'MOA Negotiation & Preparation', 'MOA Validation, Ratification & Signing', 'Issuance of Resolution of Consent', 'Submission of FPIC Report', 'Review of the FPIC Report by RRT', 'Review of the FPIC Report by ADO & LAO', 'For compliance of FPIC Team/ RO', 'CEB Deliberation', 'CEB Approved?', '(If yes) Preparation & Signing of CEB Resolution & CP', 'Release of CP to the Proponent', 'REMARKS'
+    ],
+    keys: ['proponent','nameOfProject','typeOfProject','location','area','ancestral','iccs','dateOfApplication','reviewOfApplicationDocuments','needForFBI','issuanceOfWorkOrder','preFBIConference','approvalOfWFP','paymentOfFBIFee','conductOfFBI','preparationOfFBIReport','reviewOfFBIReport','issuanceOfWorkOrderOfFPICTeam','preFPICConference','approvalOfWFP','paymentOfFPICFee','postingOfNotices','firstCommunityAssembly','secondCommunityAssembly','consensusBuildingDecision','proceedToMOANegotiation','issuanceResolutionToProceedToMOA','moaNegotiationPreparation','moaValidationRatificationSigning','issuanceResolutionOfConsent','submissionOfFPICReport','reviewByRRT','reviewByADOorLAO','forComplianceOfFPICTeam','cebDeliberation','cebApproved','preparationSigningCEBResolutionCP','releaseOfCPToProponent','remarks']
+  }));
+
+  const computeSummaryRows = (records = []) => {
+    const regionMap = new Map();
+    records.forEach((m) => {
+      const region = (m.region || 'Unknown').toString();
+      if (!regionMap.has(region)) {
+        regionMap.set(region, {
+          region,
+          total: 0,
+          issuanceOfWorkOrder: 0,
+          preFBIConference: 0,
+          conductOfFBI: 0,
+          reviewOfFBIReport: 0,
+          preFPICConference: 0,
+          firstCommunityAssembly: 0,
+          secondCommunityAssembly: 0,
+          consensusBuildingDecision: 0,
+          moaValidationRatificationSigning: 0,
+          issuanceResolutionOfConsent: 0,
+          reviewByRRT: 0,
+          reviewByADOorLAO: 0,
+          forComplianceOfFPICTeam: 0,
+          cebDeliberation: 0,
+        });
+      }
+      const obj = regionMap.get(region);
+      obj.total += 1;
+      const inc = (k) => {
+        const v = m[k];
+        if (v !== null && typeof v !== 'undefined' && String(v).trim() !== '') obj[k] += 1;
+      };
+      inc('issuanceOfWorkOrder');
+      inc('preFBIConference');
+      inc('conductOfFBI');
+      inc('reviewOfFBIReport');
+      inc('preFPICConference');
+      inc('firstCommunityAssembly');
+      inc('secondCommunityAssembly');
+      inc('consensusBuildingDecision');
+      inc('moaValidationRatificationSigning');
+      inc('issuanceResolutionOfConsent');
+      inc('reviewByRRT');
+      inc('reviewByADOorLAO');
+      inc('forComplianceOfFPICTeam');
+      inc('cebDeliberation');
+    });
+    return Array.from(regionMap.values()).sort((a, b) => (b.total || 0) - (a.total || 0));
+  };
+
+  const currentOngoingTab = ONGOING_SUBTABS.find((s) => s.id === ongoingSubTab) || ONGOING_SUBTABS[0];
+
+  const tabsHeader = (
+    <div className="mb-4 -mx-3 px-3 py-2 overflow-x-auto scrollbar-thin">
+      <div className="flex items-center gap-3 min-w-max">
+        {ONGOING_SUBTABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => { setOngoingSubTab(t.id); setCurrentPage(1); }}
+            className={cn(
+              'px-2.5 py-1 rounded-md text-xs font-semibold whitespace-nowrap',
+              ongoingSubTab === t.id ? 'bg-[#0A2D55] text-white shadow-sm' : 'bg-white/10 text-[#0A2D55] hover:bg-white/20'
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  const isOngoingMapping = (m) => {
+    if (!m) return false;
+    // explicit flag
+    if (m._ongoing === true || String(m._ongoing || '').toLowerCase() === 'true') return true;
+    // import collection marker
+    if (String(m.importCollection || '').toLowerCase().includes('ongoing')) return true;
+    // status keywords (align with stats.ongoing logic)
+    const status = String(m.cadtStatus || m.cadt_status || '').toLowerCase();
+    if (status.includes('on process') || status.includes('for processing') || status.includes('processing')) return true;
+    return false;
+  };
+
+  const ongoingRecords = (selectedCollection && String(selectedCollection).toLowerCase().includes('ongoing'))
+    ? (mappings || [])
+    : (mappings || []).filter((m) => isOngoingMapping(m));
+
+  const ongoingSummaryRows = computeSummaryRows(ongoingRecords || []);
+
+  // Filter ongoing records according to the active ongoing subtab (region tabs)
+  const filteredOngoingRecords = React.useMemo(() => {
+    if (!Array.isArray(ongoingRecords)) return [];
+    const id = String(ongoingSubTab || '').toLowerCase();
+    // Keep summary and other global views unfiltered
+    const unfilteredTabs = ['summary', 'summary-per-project', 'denied-by-mgb', 'inactive'];
+    if (unfilteredTabs.includes(id)) return ongoingRecords;
+
+    // Handle CAR explicitly
+    if (id === 'car') {
+      return ongoingRecords.filter((rec) => {
+        const d = detectRegionSheet(rec.region);
+        if (d === 'CAR') return true;
+        const v = String(rec.region || '').toUpperCase();
+        return v.includes('CORDILLERA') || v.includes('CAR');
+      });
+    }
+
+    // Handle combined region 6/7
+    if (id === 'region6-7') {
+      return ongoingRecords.filter((rec) => {
+        const d = detectRegionSheet(rec.region);
+        return d === 'Region VI' || d === 'Region VII';
+      });
+    }
+
+    // Generic Region N tabs (e.g. region1 -> Region I)
+    const m = id.match(/^region(\d{1,2})$/);
+    if (m) {
+      const n = Number(m[1]);
+      const romanMap = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII'];
+      const label = `Region ${romanMap[n - 1]}`;
+      return ongoingRecords.filter((rec) => {
+        const d = detectRegionSheet(rec.region);
+        if (d === label) return true;
+        const v = String(rec.region || '').toUpperCase();
+        if (!v) return false;
+        return v.includes(label.toUpperCase()) || v.includes(String(n));
+      });
+    }
+
+    // Fallback: return all
+    return ongoingRecords;
+  }, [ongoingRecords, ongoingSubTab]);
+
+  // Helper: return a single-line compact header (truncate if too long)
+  const compactHeaderDisplay = (text) => {
+    const s = String(text || '').replace(/\s+/g, ' ').trim();
+    if (s.length <= 40) return s;
+    return `${s.slice(0, 37).trim()}...`;
+  };
+
+  const getOngoingField = (m, key) => {
+    const formatVal = (val) => {
+      if (val === null || typeof val === 'undefined' || val === '') return null;
+      if (Array.isArray(val)) return val.length ? val.join(', ') : null;
+      return String(val);
+    };
+
+    const tryGet = (obj, k) => {
+      if (!obj || !k) return null;
+      if (Object.prototype.hasOwnProperty.call(obj, k)) return formatVal(obj[k]);
+      return null;
+    };
+
+    // Build normalized lookup from mapping keys -> values
+    const normalizedMap = {};
+    Object.keys(m || {}).forEach((orig) => {
+      try {
+        normalizedMap[normalizeHeader(orig)] = m[orig];
+      } catch (e) {
+        // ignore
+      }
+    });
+
+    const seek = (desiredKeys) => {
+      for (const dk of desiredKeys) {
+        if (!dk) continue;
+        // direct
+        const v1 = tryGet(m, dk);
+        if (v1) return v1;
+        // sanitized variant (underscored)
+        const s = sanitizeFieldName(dk);
+        const v2 = tryGet(m, s);
+        if (v2) return v2;
+        // normalized header match
+        const nk = normalizeHeader(dk);
+        if (normalizedMap[nk]) return formatVal(normalizedMap[nk]);
+        // try compacted key (letters+digits only)
+        const ck = compactHeader(dk);
+        for (const orig of Object.keys(m || {})) {
+          if (compactHeader(orig) === ck) return formatVal(m[orig]);
+        }
+      }
+      return null;
+    };
+
+    // Common mappings for friendly keys
+    switch (key) {
+      case 'proponent': return seek(['proponent', 'applicant', 'applicantProponent', 'applicant_proponent']) || '-';
+      case 'nameOfProject': return seek(['nameOfProject', 'projectName', 'name', 'title']) || '-';
+      case 'typeOfProject': return seek(['natureOfProject', 'nature', 'projectType', 'typeOfProject']) || '-';
+      case 'location': return seek(['location', 'province', 'location_full', 'provinceName']) || '-';
+      case 'area': return seek(['totalArea', 'area', 'area_ha', 'projectArea']) || '-';
+      case 'ancestral': return seek(['affectedAncestralDomain', 'ancestralDomain', 'ancestral_domains']) || '-';
+      case 'iccs': return seek(['icc', 'iccs', 'affectedICC', 'affected_icc']) || '-';
+      case 'dateOfApplication': return seek(['dateOfApplication', 'date_of_application', 'date']) || '-';
+      default: {
+        // try direct, then normalized/compacted matches
+        const v = seek([key]);
+        if (v) return v;
+        const nk = normalizeHeader(key);
+        if (normalizedMap[nk]) return formatVal(normalizedMap[nk]);
+        // fallback: find any mapping key that includes the desired normalized key
+        for (const orig of Object.keys(m || {})) {
+          const on = normalizeHeader(orig);
+          if (on.includes(nk) || nk.includes(on)) {
+            const fv = formatVal(m[orig]);
+            if (fv) return fv;
+          }
+        }
+        return '-';
+      }
+    }
+  };
+
   const getBarangaysFull = (mapping) => (
     formatListFull(mapping.barangays)
   );
@@ -272,6 +555,19 @@ export function Dashboard({
     const timeoutId = setTimeout(() => onClearExternalAlert(), 10_000);
     return () => clearTimeout(timeoutId);
   }, [externalAlert, externalAlertTick, onClearExternalAlert]);
+
+  // If the selected import collection appears to be an 'ongoing' collection,
+  // switch the active tab so the collection's records are displayed in Ongoing.
+  useEffect(() => {
+    try {
+      if (selectedCollection && String(selectedCollection).toLowerCase().includes('ongoing')) {
+        console.log('Dashboard: selectedCollection indicates ongoing -> switching activeTab to ongoing');
+        setActiveTab('ongoing');
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [selectedCollection]);
 
   // Filter mappings based on search query
   const regionOptions = React.useMemo(() => {
@@ -291,6 +587,13 @@ export function Dashboard({
   ]), []);
 
   const filteredMappings = mappings.filter((mapping) => {
+    // Hide mappings marked as ongoing or imported into an 'ongoing' collection
+    // from the main mappings (Approved) view
+    if (activeTab === 'mappings' && mapping) {
+      if (mapping._ongoing === true || String(mapping._ongoing || '').toLowerCase() === 'true') return false;
+      const ic = String(mapping.importCollection || '').toLowerCase();
+      if (ic && ic.includes('ongoing')) return false;
+    }
     const query = searchQuery.toLowerCase();
     if (regionFilter !== 'all' && mapping.region !== regionFilter) return false;
     if (remarksFilter === 'with' && String(mapping.remarks || '').trim() === '') return false;
@@ -314,6 +617,145 @@ export function Dashboard({
   const paginatedMappings = filteredMappings.slice(startIndex, endIndex);
   const canGoPrevious = currentPage > 1;
   const canGoNext = currentPage < totalPages;
+
+  // Reset page when switching tabs so pagination stays consistent
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab]);
+
+  // Paginate ongoing records separately (use the same `currentPage` and itemsPerPage)
+  const ongoingTotalPages = Math.max(1, Math.ceil(((filteredOngoingRecords && filteredOngoingRecords.length) || 0) / itemsPerPage));
+  const ongoingStart = (currentPage - 1) * itemsPerPage;
+  const ongoingEnd = ongoingStart + itemsPerPage;
+  const paginatedOngoing = Array.isArray(filteredOngoingRecords) ? filteredOngoingRecords.slice(ongoingStart, ongoingEnd) : [];
+
+  const filteredCollectionsForDropdown = React.useMemo(() => {
+    if (!Array.isArray(availableCollections)) return [];
+    if (activeTab === 'ongoing') {
+      return availableCollections.filter((c) => c && c.collectionName && (String(c.type || '').toLowerCase() === 'ongoing' || String(c.collectionName).toLowerCase().includes('ongoing')));
+    }
+    // For Approved (mappings) and other tabs, exclude any 'ongoing' collections
+    return availableCollections.filter((c) => c && c.collectionName && !(String(c.type || '').toLowerCase() === 'ongoing' || String(c.collectionName).toLowerCase().includes('ongoing')));
+  }, [availableCollections, activeTab]);
+  // Debug: log what collections are available for this tab
+  useEffect(() => {
+    try {
+      console.debug('Dashboard: activeTab=', activeTab, 'selectedCollection=', selectedCollection, 'filteredCollectionsForDropdown=', filteredCollectionsForDropdown);
+    } catch (e) {
+      // ignore
+    }
+  }, [activeTab, selectedCollection, filteredCollectionsForDropdown]);
+
+
+  // Keep separate dropdown selections per tab so choosing a collection in Approved
+  // doesn't change the visible selection in Ongoing and vice-versa.
+  const [dropdownSelections, setDropdownSelections] = useState(() => ({
+    mappings: selectedCollection || 'mappings',
+    ongoing: (selectedCollection && String(selectedCollection).toLowerCase().includes('ongoing')) ? selectedCollection : '__none__',
+  }));
+
+  const currentSelectionKey = activeTab === 'ongoing' ? 'ongoing' : 'mappings';
+  const currentSelectionValue = (dropdownSelections && dropdownSelections[currentSelectionKey]) || '';
+  const currentSelectionDisplay = (Array.isArray(availableCollections) && availableCollections.find((c) => c.collectionName === currentSelectionValue)?.displayName) || (currentSelectionValue && currentSelectionValue !== '__none__' ? currentSelectionValue : 'Select collection');
+
+  useEffect(() => {
+    try {
+      if (!selectedCollection) return;
+      if (String(selectedCollection).toLowerCase().includes('ongoing')) {
+        setDropdownSelections((s) => ({ ...s, ongoing: selectedCollection }));
+      } else {
+        setDropdownSelections((s) => ({ ...s, mappings: selectedCollection }));
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [selectedCollection]);
+
+  // Ensure dropdown shows a sensible default when collections are available
+  useEffect(() => {
+    try {
+      // If ongoing dropdown has no selection but there are ongoing collections, pick the first
+      if (Array.isArray(filteredCollectionsForDropdown)) {
+        if (filteredCollectionsForDropdown.length > 0 && (!dropdownSelections || !dropdownSelections.ongoing || dropdownSelections.ongoing === '__none__')) {
+          const first = filteredCollectionsForDropdown[0];
+          if (first && first.collectionName) setDropdownSelections((s) => ({ ...s, ongoing: first.collectionName }));
+        }
+        // For mappings dropdown, default to 'mappings' if unset
+        if (!dropdownSelections || !dropdownSelections.mappings) {
+          setDropdownSelections((s) => ({ ...s, mappings: selectedCollection || 'mappings' }));
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [filteredCollectionsForDropdown]);
+
+  // When the active tab changes, load the stored dropdown selection for that tab.
+  useEffect(() => {
+    try {
+      const key = activeTab === 'ongoing' ? 'ongoing' : 'mappings';
+      const value = dropdownSelections[key];
+      if (!value || value === '__none__') return;
+      if (typeof onSelectCollection === 'function') {
+        // Only trigger load if App hasn't already selected the same collection
+        // Defensive: don't call onSelectCollection('mappings') when switching to ongoing
+        if (activeTab === 'ongoing' && String(value) === 'mappings') {
+          console.log('Dashboard: skipping invalid ongoing selection value="mappings"');
+          return;
+        }
+
+        if (!selectedCollection || String(selectedCollection) !== String(value)) {
+          console.log('Dashboard: activeTab changed -> calling onSelectCollection with', value, { activeTab, selectedCollection });
+          onSelectCollection(value);
+        } else {
+          console.log('Dashboard: activeTab changed -> selectedCollection already matches', selectedCollection);
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [activeTab]);
+
+  // If user switches to Ongoing but no mappings are loaded yet, try to load
+  // the stored ongoing collection (or the first available) so the table isn't empty.
+  useEffect(() => {
+    try {
+      if (activeTab !== 'ongoing') return;
+      // If there are already mappings loaded, do nothing
+      if (Array.isArray(mappings) && mappings.length > 0) return;
+
+      let desired = (dropdownSelections && dropdownSelections.ongoing && dropdownSelections.ongoing !== '__none__')
+        ? dropdownSelections.ongoing
+        : (Array.isArray(filteredCollectionsForDropdown) && filteredCollectionsForDropdown[0] ? filteredCollectionsForDropdown[0].collectionName : null);
+
+      // If the desired/current selection is the generic 'mappings' but no mappings
+      // are loaded, prefer any available ongoing collection (first in list).
+      if (String(desired).toLowerCase() === 'mappings' && Array.isArray(filteredCollectionsForDropdown) && filteredCollectionsForDropdown.length > 0) {
+        const firstOngoing = filteredCollectionsForDropdown.find((c) => String(c.collectionName || '').toLowerCase().includes('ongoing')) || filteredCollectionsForDropdown[0];
+        if (firstOngoing && firstOngoing.collectionName) desired = firstOngoing.collectionName;
+      }
+
+      if (!desired) return;
+
+      if (!selectedCollection || String(selectedCollection) !== String(desired)) {
+        console.log('Dashboard: activeTab is ongoing and no mappings loaded — loading', desired);
+        if (typeof onSelectCollection === 'function') onSelectCollection(desired);
+      } else {
+        console.log('Dashboard: activeTab is ongoing but selectedCollection already matches', selectedCollection);
+        // If selectedCollection is 'mappings' but there are no mappings yet, try to load
+        // a real ongoing collection if available.
+        if (Array.isArray(mappings) && mappings.length === 0 && String(selectedCollection).toLowerCase() === 'mappings' && Array.isArray(filteredCollectionsForDropdown) && filteredCollectionsForDropdown.length > 0) {
+          const fallback = filteredCollectionsForDropdown.find((c) => String(c.collectionName || '').toLowerCase().includes('ongoing')) || filteredCollectionsForDropdown[0];
+          if (fallback && fallback.collectionName && typeof onSelectCollection === 'function' && String(fallback.collectionName) !== String(selectedCollection)) {
+            console.log('Dashboard: fallback loading ongoing collection ->', fallback.collectionName);
+            onSelectCollection(fallback.collectionName);
+          }
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [activeTab, dropdownSelections, filteredCollectionsForDropdown, mappings, selectedCollection]);
 
   // Reset to page 1 when search query changes
   const handleSearch = (value) => {
@@ -395,8 +837,18 @@ export function Dashboard({
     try {
       setIsImporting(true);
       setImportProgress(5);
-      const buffer = await file.arrayBuffer();
-      const wb = XLSX.read(buffer, { type: 'array' });
+      const fileName = String(file.name || '').toLowerCase();
+      const isCsv = fileName.endsWith('.csv') || String(file.type || '').toLowerCase() === 'text/csv';
+      let wb;
+      if (isCsv) {
+        // Read CSV as text and parse into a workbook using XLSX.read
+        // (xlsx-js-style doesn't expose csv_to_sheet; read CSV as string instead)
+        const text = await file.text();
+        wb = XLSX.read(text, { type: 'string' });
+      } else {
+        const buffer = await file.arrayBuffer();
+        wb = XLSX.read(buffer, { type: 'array' });
+      }
       const headerKeywords = [
         'survey',
         'number',
@@ -627,14 +1079,45 @@ export function Dashboard({
       // Start actual import phase
       setIsImporting(true);
       setImportProgress(1);
-      const options = { mode, onProgress: (p) => setImportProgress(p) };
+      // If user is the NCIP inventory user and is currently on the Ongoing tab,
+      // force the import into a dedicated ongoing collection so Approved and
+      // Ongoing are stored separately in Firestore.
+      let options = { mode, onProgress: (p) => setImportProgress(p), targetTab: activeTab };
+      let forcedOngoingCollection = null;
+      try {
+        const userEmail = (user?.email || '').toLowerCase();
+        if (userEmail === 'ncip@inventory.gov.ph' && activeTab === 'ongoing') {
+          // Force newCollection mode and use a dedicated ongoing collection name
+          const uid = user?.uid || 'anon';
+          forcedOngoingCollection = `mappings_ongoing_${uid}`;
+          options = { ...options, mode: 'newCollection', collectionName: forcedOngoingCollection, forceOngoing: true };
+        }
+      } catch (e) {
+        // ignore
+      }
       if (mode === 'newCollection') {
-        options.collectionName = collectionName || importCollectionName;
+        // If we forced an ongoing collection, always use that name regardless
+        // of the user-supplied collection name (prevents overwriting to mappings_import_...)
+        if (forcedOngoingCollection) {
+          options.collectionName = forcedOngoingCollection;
+        } else {
+          options.collectionName = collectionName || importCollectionName;
+        }
         // When creating a new collection, include the raw sheet rows so the
         // created collection uses the original Excel headers as document fields.
         options.rawImport = importRawSheets;
       }
       await onImportMappings(importPreviewRecords, options);
+      // If we imported into a dedicated ongoing collection, switch UI to show it
+      try {
+        const col = options && options.collectionName;
+        if (col && String(col).toLowerCase().includes('ongoing')) {
+          setActiveTab('ongoing');
+          if (typeof onSelectCollection === 'function') onSelectCollection(col);
+        }
+      } catch (e) {
+        // ignore
+      }
       const modeMsg = mode === 'add' ? 'added' : mode === 'replace' ? 'replaced' : (mode === 'newCollection' ? 'imported into new collection' : 'processed');
       setAlertTick((t) => t + 1);
       setAlert({ type: 'success', message: `Import successful. ${importPreviewRecords.length} records ${modeMsg}.` });
@@ -1190,20 +1673,42 @@ export function Dashboard({
               </div>
 
               <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-                {Array.isArray(availableCollections) && availableCollections.length > 1 ? (
+                {Array.isArray(availableCollections) && availableCollections.length > 1 && activeTab !== 'ongoing' && activeTab !== 'overview' ? (
                   <div className="flex items-center gap-2 mr-2">
                         <label className="sr-only">Collection</label>
                         <Select
-                          value={selectedCollection}
-                          onValueChange={(value) => onSelectCollection(value)}
+                          value={dropdownSelections[activeTab === 'ongoing' ? 'ongoing' : 'mappings']}
+                          onValueChange={(value) => {
+                            const key = activeTab === 'ongoing' ? 'ongoing' : 'mappings';
+                            console.log('Dashboard: dropdown changed ->', { key, value, activeTab, selectedCollection });
+                            setDropdownSelections((s) => ({ ...s, [key]: value }));
+                            // If the dropdown change happened on the currently active tab,
+                            // load the collection immediately so the selected data remains visible.
+                            if ((activeTab === 'ongoing' && key === 'ongoing') || (activeTab === 'mappings' && key === 'mappings')) {
+                              // don't trigger load for the placeholder empty entry
+                              if (value && value !== '__none__' && typeof onSelectCollection === 'function') {
+                                console.log('Dashboard: calling onSelectCollection from dropdown ->', value);
+                                onSelectCollection(value);
+                              }
+                            }
+                          }}
                         >
-                          <SelectTrigger className="w-[220px] bg-white/5 text-white/90 text-sm rounded-lg px-3 py-2 border border-white/10">
+                          <SelectTrigger className="relative w-[220px] bg-white/5 text-white/90 text-sm rounded-lg px-3 py-2 border border-white/10">
                             <SelectValue placeholder="Select collection" />
+                            <div className="absolute inset-0 pointer-events-none flex items-center px-3">
+                              <span className="truncate text-sm text-white/90">{currentSelectionDisplay}</span>
+                            </div>
                           </SelectTrigger>
                           <SelectContent className="bg-white border-[#0A2D55]/10 rounded-xl shadow-2xl">
-                            {availableCollections.filter((c) => c && c.collectionName).map((c) => (
-                              <SelectItem key={c.id} value={c.collectionName}>{c.displayName || c.collectionName}</SelectItem>
-                            ))}
+                            {filteredCollectionsForDropdown.length > 0 ? (
+                              filteredCollectionsForDropdown.map((c) => (
+                                <SelectItem key={c.id} value={c.collectionName}>{c.displayName || c.collectionName}</SelectItem>
+                              ))
+                            ) : (
+                              <SelectItem value="__none__" disabled>
+                                {activeTab === 'ongoing' ? 'No ongoing collections' : 'No collections'}
+                              </SelectItem>
+                            )}
                           </SelectContent>
                         </Select>
                   </div>
@@ -1229,7 +1734,7 @@ export function Dashboard({
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".xlsx,.xls"
+                  accept=".xlsx,.xls,.csv"
                   onChange={handleImportFile}
                   className="hidden"
                 />
@@ -1445,14 +1950,14 @@ export function Dashboard({
                             key={idx}
                             className={
                               isInventoryUser
-                                ? "px-4 sm:px-6 py-3 text-left text-xs font-semibold text-[#0A2D55] uppercase tracking-wide whitespace-normal break-words min-w-[140px]"
-                                : "px-4 sm:px-6 py-3 text-left text-xs font-semibold text-[#0A2D55] uppercase tracking-wide"
+                                ? "px-3 sm:px-4 py-2 text-left text-[10px] sm:text-xs font-semibold text-[#0A2D55] normal-case leading-snug whitespace-normal break-words min-w-[120px]"
+                                : "px-3 sm:px-4 py-2 text-left text-[10px] sm:text-xs font-semibold text-[#0A2D55] normal-case leading-snug"
                             }
                           >
                             {h}
                           </th>
                         ))}
-                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-[#0A2D55] uppercase tracking-wide w-[120px] sticky right-0 bg-[#F4F7FA] shadow-[-6px_0_10px_rgba(7,26,44,0.06)]">ACTIONS</th>
+                        <th className="px-3 sm:px-4 py-2 text-left text-[10px] sm:text-xs font-semibold text-[#0A2D55] normal-case w-[120px] sticky right-0 bg-[#F4F7FA] shadow-[-6px_0_10px_rgba(7,26,44,0.06)]">ACTIONS</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1598,42 +2103,85 @@ export function Dashboard({
 
                 {/* Pagination Controls */}
                 <div className="flex items-center justify-between px-4 sm:px-6 py-4 sm:py-5 border-t border-[#0A2D55]/10 bg-[#0A2D55]/2">
-                  <div className="text-xs sm:text-sm text-[#0A2D55]/70 font-medium">
-                    Showing <span className="font-bold text-[#0A2D55]">{startIndex + 1}</span> to <span className="font-bold text-[#0A2D55]">{Math.min(endIndex, filteredMappings.length)}</span> of <span className="font-bold text-[#0A2D55]">{filteredMappings.length}</span> records
-                  </div>
-                  <div className="flex items-center gap-2 sm:gap-3">
-                    <button
-                      onClick={() => setCurrentPage(currentPage - 1)}
-                      disabled={!canGoPrevious}
-                      className={cn(
-                        'flex items-center justify-center gap-1 px-2.5 sm:px-4 py-2 rounded-lg font-semibold text-xs sm:text-sm transition',
-                        canGoPrevious
-                          ? 'bg-[#0A2D55] text-white hover:bg-[#0C3B6E] active:scale-95 shadow-md'
-                          : 'bg-[#0A2D55]/20 text-[#0A2D55]/50 cursor-not-allowed'
-                      )}
-                      aria-label="Previous page"
-                    >
-                      <span className="sm:hidden">←</span>
-                      <span className="hidden sm:inline">← Previous</span>
-                    </button>
-                    <div className="text-xs sm:text-sm text-[#0A2D55] font-semibold px-2 py-1">
-                      Page <span className="text-[#F2C94C]">{currentPage}</span> of <span className="text-[#F2C94C]">{totalPages || 1}</span>
-                    </div>
-                    <button
-                      onClick={() => setCurrentPage(currentPage + 1)}
-                      disabled={!canGoNext}
-                      className={cn(
-                        'flex items-center justify-center gap-1 px-2.5 sm:px-4 py-2 rounded-lg font-semibold text-xs sm:text-sm transition',
-                        canGoNext
-                          ? 'bg-[#0A2D55] text-white hover:bg-[#0C3B6E] active:scale-95 shadow-md'
-                          : 'bg-[#0A2D55]/20 text-[#0A2D55]/50 cursor-not-allowed'
-                      )}
-                      aria-label="Next page"
-                    >
-                      <span className="sm:hidden">→</span>
-                      <span className="hidden sm:inline">Next →</span>
-                    </button>
-                  </div>
+                  {activeTab === 'ongoing' ? (
+                    <>
+                      <div className="text-xs sm:text-sm text-[#0A2D55]/70 font-medium">
+                        Showing <span className="font-bold text-[#0A2D55]">{ongoingStart + 1}</span> to <span className="font-bold text-[#0A2D55]">{Math.min(ongoingEnd, (ongoingRecords || []).length)}</span> of <span className="font-bold text-[#0A2D55]">{(ongoingRecords || []).length}</span> records
+                      </div>
+                      <div className="flex items-center gap-2 sm:gap-3">
+                        <button
+                          onClick={() => setCurrentPage(currentPage - 1)}
+                          disabled={currentPage <= 1}
+                          className={cn(
+                            'flex items-center justify-center gap-1 px-2.5 sm:px-4 py-2 rounded-lg font-semibold text-xs sm:text-sm transition',
+                            currentPage > 1
+                              ? 'bg-[#0A2D55] text-white hover:bg-[#0C3B6E] active:scale-95 shadow-md'
+                              : 'bg-[#0A2D55]/20 text-[#0A2D55]/50 cursor-not-allowed'
+                          )}
+                          aria-label="Previous page"
+                        >
+                          <span className="sm:hidden">←</span>
+                          <span className="hidden sm:inline">← Previous</span>
+                        </button>
+                        <div className="text-xs sm:text-sm text-[#0A2D55] font-semibold px-2 py-1">
+                          Page <span className="text-[#F2C94C]">{currentPage}</span> of <span className="text-[#F2C94C]">{ongoingTotalPages || 1}</span>
+                        </div>
+                        <button
+                          onClick={() => setCurrentPage(currentPage + 1)}
+                          disabled={currentPage >= ongoingTotalPages}
+                          className={cn(
+                            'flex items-center justify-center gap-1 px-2.5 sm:px-4 py-2 rounded-lg font-semibold text-xs sm:text-sm transition',
+                            currentPage < ongoingTotalPages
+                              ? 'bg-[#0A2D55] text-white hover:bg-[#0C3B6E] active:scale-95 shadow-md'
+                              : 'bg-[#0A2D55]/20 text-[#0A2D55]/50 cursor-not-allowed'
+                          )}
+                          aria-label="Next page"
+                        >
+                          <span className="hidden sm:inline">Next →</span>
+                          <span className="sm:hidden">→</span>
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-xs sm:text-sm text-[#0A2D55]/70 font-medium">
+                        Showing <span className="font-bold text-[#0A2D55]">{startIndex + 1}</span> to <span className="font-bold text-[#0A2D55]">{Math.min(endIndex, filteredMappings.length)}</span> of <span className="font-bold text-[#0A2D55]">{filteredMappings.length}</span> records
+                      </div>
+                      <div className="flex items-center gap-2 sm:gap-3">
+                        <button
+                          onClick={() => setCurrentPage(currentPage - 1)}
+                          disabled={!canGoPrevious}
+                          className={cn(
+                            'flex items-center justify-center gap-1 px-2.5 sm:px-4 py-2 rounded-lg font-semibold text-xs sm:text-sm transition',
+                            canGoPrevious
+                              ? 'bg-[#0A2D55] text-white hover:bg-[#0C3B6E] active:scale-95 shadow-md'
+                              : 'bg-[#0A2D55]/20 text-[#0A2D55]/50 cursor-not-allowed'
+                          )}
+                          aria-label="Previous page"
+                        >
+                          <span className="sm:hidden">←</span>
+                          <span className="hidden sm:inline">← Previous</span>
+                        </button>
+                        <div className="text-xs sm:text-sm text-[#0A2D55] font-semibold px-2 py-1">
+                          Page <span className="text-[#F2C94C]">{currentPage}</span> of <span className="text-[#F2C94C]">{totalPages || 1}</span>
+                        </div>
+                        <button
+                          onClick={() => setCurrentPage(currentPage + 1)}
+                          disabled={!canGoNext}
+                          className={cn(
+                            'flex items-center justify-center gap-1 px-2.5 sm:px-4 py-2 rounded-lg font-semibold text-xs sm:text-sm transition',
+                            canGoNext
+                              ? 'bg-[#0A2D55] text-white hover:bg-[#0C3B6E] active:scale-95 shadow-md'
+                              : 'bg-[#0A2D55]/20 text-[#0A2D55]/50 cursor-not-allowed'
+                          )}
+                          aria-label="Next page"
+                        >
+                          <span className="sm:hidden">→</span>
+                          <span className="hidden sm:inline">Next →</span>
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             )}
@@ -1644,13 +2192,117 @@ export function Dashboard({
           <div className="animate-section-1">
             <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 animate-header">
               <h2 className="text-lg sm:text-2xl font-bold text-[#0A2D55]">Ongoing</h2>
-              <div className="w-full sm:w-auto flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                <p className="text-sm text-[#0A2D55]/70">Placeholder for ongoing items. Customize as needed.</p>
+            </div>
+            {isInventoryUser ? (
+              <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-6 overflow-x-auto">
+                {/* Ongoing subtabs */}
+                <>
+                  {tabsHeader}
+                  {currentOngoingTab.id === 'summary' ? (
+                    <div className="overflow-x-auto">
+                      <table className="min-w-[1100px] w-full table-auto">
+                        <thead className="bg-[#0A2D55]/5 border-b border-[#0A2D55]/15">
+                          <tr>
+                            {[
+                              'Region',
+                              'No. of Ongoing CP Applications',
+                              'Issuance of Work Order',
+                              'Pre-FBI Conference',
+                              'Conduct of FBI',
+                              'Review of FBI Report',
+                              'Pre-FPIC Conference',
+                              '1st Community Assembly',
+                              '2nd Community Assembly',
+                              'Consensus Building & Decision Meeting',
+                              'MOA Validation, Ratification & Signing',
+                              'Issuance of Resolution of Consent',
+                              'Review of the FPIC Report by RRT',
+                              'Review of the FPIC Report by ADO & LAO',
+                              'For compliance of FPIC Team',
+                              'CEB Deliberation',
+                            ].map((h, i) => (
+                              <th key={i} title={h} className="px-3 sm:px-4 py-2 text-left text-[11px] sm:text-[12px] font-semibold text-[#0A2D55] normal-case leading-snug whitespace-nowrap truncate max-w-[220px]">{compactHeaderDisplay(h)}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {ongoingSummaryRows.length === 0 ? (
+                            <tr>
+                              <td colSpan={16} className="px-4 sm:px-6 py-6 text-center text-[#0A2D55]/60">No ongoing items yet.</td>
+                            </tr>
+                          ) : (
+                            ongoingSummaryRows.map((r, idx) => (
+                              <tr key={r.region || idx} className="border-b border-[#0A2D55]/10">
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.region}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal font-semibold">{r.total}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.issuanceOfWorkOrder}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.preFBIConference}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.conductOfFBI}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.reviewOfFBIReport}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.preFPICConference}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.firstCommunityAssembly}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.secondCommunityAssembly}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.consensusBuildingDecision}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.moaValidationRatificationSigning}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.issuanceResolutionOfConsent}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.reviewByRRT}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.reviewByADOorLAO}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.forComplianceOfFPICTeam}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.cebDeliberation}</td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="min-w-[1100px] w-full table-auto">
+                        <thead className="bg-[#0A2D55]/5 border-b border-[#0A2D55]/15">
+                          <tr>
+                            {currentOngoingTab.headers.map((h, i) => (
+                              <th key={i} title={h} className="px-3 sm:px-4 py-2 text-left text-[11px] sm:text-[12px] font-semibold text-[#0A2D55] normal-case leading-snug whitespace-nowrap truncate max-w-[220px]">{compactHeaderDisplay(h)}</th>
+                            ))}
+                            <th className="px-2 sm:px-2 py-1 text-left text-[10px] sm:text-[11px] font-semibold text-[#0A2D55] normal-case w-[110px]">ACTIONS</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(!ongoingRecords || ongoingRecords.length === 0) ? (
+                            <tr>
+                              <td colSpan={currentOngoingTab.headers.length + 1} className="px-4 sm:px-6 py-6 text-center text-[#0A2D55]/60 whitespace-normal">No ongoing items yet.</td>
+                            </tr>
+                          ) : (
+                            paginatedOngoing.map((m, idx) => (
+                              <tr key={m.id || idx} className="border-b border-[#0A2D55]/10">
+                                {currentOngoingTab.keys.map((k, j) => (
+                                  <td key={j} className="px-2.5 sm:px-3 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{getOngoingField(m, k)}</td>
+                                ))}
+                                <td className="px-2.5 sm:px-3 py-2 text-[12px] text-[#0A2D55]/80 w-[110px]">
+                                  <div className="flex items-center gap-1.5">
+                                    <button type="button" onClick={() => handleViewMapping(m)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#0A2D55]/15 text-[#0A2D55] hover:bg-[#0A2D55]/5 transition" title="View" aria-label="View"><Eye size={15} /></button>
+                                    <button type="button" onClick={() => onEditMapping(m)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#F2C94C]/40 text-[#8B6F1C] hover:bg-[#F2C94C]/15 transition" title="Edit" aria-label="Edit"><Pencil size={15} /></button>
+                                    <button type="button" onClick={() => handleOpenDeleteModal(m)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-red-200 text-red-600 hover:bg-red-50 transition" title="Delete" aria-label="Delete"><Trash2 size={15} /></button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
               </div>
-            </div>
-            <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-6">
-              <p className="text-sm text-[#0A2D55]/60">No ongoing items yet.</p>
-            </div>
+            ) : (
+              <>
+                <div className="w-full sm:w-auto flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-4">
+                  <p className="text-sm text-[#0A2D55]/70">Placeholder for ongoing items. Customize as needed.</p>
+                </div>
+                <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-6">
+                  <p className="text-sm text-[#0A2D55]/60">No ongoing items yet.</p>
+                </div>
+              </>
+            )}
           </div>
         )}
       </main>

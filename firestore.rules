@@ -14,10 +14,24 @@ service cloud.firestore {
     }
     
     // Allow authenticated users to create/read/write their own import collections.
-    // Collection names must start with `mappings_import_<uid>_...`.
+    // Collection names must start with `mappings_import_<uid>_...` or
+    // `mappings_ongoing_<uid>...` for NCIP ongoing imports.
     match /{collId}/{docId} {
-      allow read, write: if request.auth != null
-        && collId.matches('^mappings_import_' + request.auth.uid + '.*$');
+      // Read rules:
+      // - Owners (collection names containing their uid) may read their own imports
+      // - The NCIP inventory account may read any `mappings_ongoing_...` collection
+      allow read: if request.auth != null && (
+        collId.matches('^mappings_import_' + request.auth.uid + '.*$') ||
+        collId.matches('^mappings_ongoing_' + request.auth.uid + '.*$') ||
+        (request.auth.token.email != null && request.auth.token.email == 'ncip@inventory.gov.ph' && collId.matches('^mappings_ongoing_.*$'))
+      );
+
+      // Write rules:
+      // - Owners can write into their own `mappings_import_...` or `mappings_ongoing_...` collections
+      allow write: if request.auth != null && (
+        collId.matches('^mappings_import_' + request.auth.uid + '.*$') ||
+        collId.matches('^mappings_ongoing_' + request.auth.uid + '.*$')
+      );
     }
     
     // Allow users to list their registered import collections under users/{uid}/imports

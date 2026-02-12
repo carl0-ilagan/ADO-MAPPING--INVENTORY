@@ -55,9 +55,17 @@ export function App() {
                 visibleImports.map(async (i) => {
                   try {
                     const docs = await getMappingsFromCollection(i.collectionName);
-                    return { importMeta: i, docsCount: Array.isArray(docs) ? docs.length : 0 };
+                    const docsArray = Array.isArray(docs) ? docs : [];
+                    const importMeta = { ...i };
+                    // If any document in the collection is marked as ongoing, tag the importMeta
+                    if (docsArray.some((d) => d && (d._ongoing === true || String(d.importCollection || '').toLowerCase().includes('ongoing') || String(i.collectionName || '').toLowerCase().includes('ongoing')))) {
+                      importMeta.type = 'ongoing';
+                    }
+                    importMeta.readable = true;
+                    return { importMeta, docsCount: docsArray.length };
                   } catch (err) {
-                    return { importMeta: i, docsCount: 0 };
+                    const importMeta = { ...i, readable: false };
+                    return { importMeta, docsCount: -1 };
                   }
                 })
               );
@@ -70,9 +78,17 @@ export function App() {
                   id: i.collectionName,
                   collectionName: i.collectionName,
                   displayName: i.displayName || (i.collectionName && i.collectionName.startsWith(prefix) ? i.collectionName.slice(prefix.length) : i.collectionName),
+                  type: i.type || null,
+                  readable: typeof i.readable === 'boolean' ? i.readable : true,
                 })),
               ];
               setAvailableCollections(list);
+              // Debug: report available collections for troubleshooting
+              try {
+                console.debug('App: availableCollections set ->', JSON.parse(JSON.stringify(list)));
+              } catch (e) {
+                console.debug('App: availableCollections set', list);
+              }
             setSelectedCollection('mappings');
           } catch (e) {
             console.warn('Unable to load user import collections', e);
@@ -288,8 +304,11 @@ export function App() {
         onProgress(100);
 
         if (!fallbackFlat) {
-          try {
-            await registerImportCollection(currentUser.uid, targetCollection, { count: createdFlat, displayName: targetDisplayName });
+            try {
+            const meta = { count: createdFlat, displayName: targetDisplayName };
+            // If the caller requested forcing into an ongoing collection, persist that metadata
+            if (options && options.forceOngoing) meta.type = 'ongoing';
+            await registerImportCollection(currentUser.uid, targetCollection, meta);
             const imports = await getUserImportCollections(currentUser.uid);
             const prefix = `mappings_import_${currentUser.uid}_`;
             const visibleImports = imports.filter((i) => Number(i.count) > 0 && i.collectionName && String(i.collectionName).trim());
@@ -297,9 +316,16 @@ export function App() {
               visibleImports.map(async (i) => {
                 try {
                   const docs = await getMappingsFromCollection(i.collectionName);
-                  return { importMeta: i, docsCount: Array.isArray(docs) ? docs.length : 0 };
+                  const docsArray = Array.isArray(docs) ? docs : [];
+                  const importMeta = { ...i };
+                  if (docsArray.some((d) => d && (d._ongoing === true || String(d.importCollection || '').toLowerCase().includes('ongoing') || String(i.collectionName || '').toLowerCase().includes('ongoing')))) {
+                    importMeta.type = 'ongoing';
+                  }
+                  importMeta.readable = true;
+                  return { importMeta, docsCount: docsArray.length };
                 } catch (err) {
-                  return { importMeta: i, docsCount: 0 };
+                  const importMeta = { ...i, readable: false };
+                  return { importMeta, docsCount: -1 };
                 }
               })
             );
@@ -362,6 +388,12 @@ export function App() {
           remarks: record.remarks || '',
           totalArea: record.totalArea || 0,
         };
+        // If the import was initiated while the user was on the 'ongoing' tab,
+        // and the current user is the NCIP account, mark imported mappings
+        // with an internal flag so the Dashboard can show them in the Ongoing view.
+        if (options && options.targetTab === 'ongoing' && String(currentUser.email || '').toLowerCase() === 'ncip@inventory.gov.ph') {
+          newMapping._ongoing = true;
+        }
 
         const key = surveyNumber.toLowerCase();
         const existing = existingBySurvey.get(key);
@@ -415,7 +447,9 @@ export function App() {
       // If we created a real new collection (no fallback), register and load it
       if (!fallbackToMappings && mode === 'newCollection' && targetCollection) {
           try {
-          await registerImportCollection(currentUser.uid, targetCollection, { count: createdCount, displayName: targetDisplayName });
+          const meta = { count: createdCount, displayName: targetDisplayName };
+          if (options && options.forceOngoing) meta.type = 'ongoing';
+          await registerImportCollection(currentUser.uid, targetCollection, meta);
           const imports = await getUserImportCollections(currentUser.uid);
           const prefix = `mappings_import_${currentUser.uid}_`;
           const visibleImports = imports.filter((i) => Number(i.count) > 0 && i.collectionName && String(i.collectionName).trim());
@@ -424,9 +458,16 @@ export function App() {
             visibleImports.map(async (i) => {
               try {
                 const docs = await getMappingsFromCollection(i.collectionName);
-                return { importMeta: i, docsCount: Array.isArray(docs) ? docs.length : 0 };
+                const docsArray = Array.isArray(docs) ? docs : [];
+                const importMeta = { ...i };
+                if (docsArray.some((d) => d && (d._ongoing === true || String(d.importCollection || '').toLowerCase().includes('ongoing') || String(i.collectionName || '').toLowerCase().includes('ongoing')))) {
+                  importMeta.type = 'ongoing';
+                }
+                importMeta.readable = true;
+                return { importMeta, docsCount: docsArray.length };
               } catch (err) {
-                return { importMeta: i, docsCount: 0 };
+                const importMeta = { ...i, readable: false };
+                return { importMeta, docsCount: -1 };
               }
             })
           );
@@ -434,12 +475,14 @@ export function App() {
           const finalImports = checked.filter((c) => c.docsCount > 0).map((c) => c.importMeta);
 
           const list = [
-            { id: 'mappings', collectionName: 'mappings', displayName: 'mappings' },
-            ...finalImports.map((i) => ({
-              id: i.collectionName,
-              collectionName: i.collectionName,
-              displayName: i.displayName || (i.collectionName && i.collectionName.startsWith(prefix) ? i.collectionName.slice(prefix.length) : i.collectionName),
-            })),
+              { id: 'mappings', collectionName: 'mappings', displayName: 'mappings' },
+              ...finalImports.map((i) => ({
+                id: i.collectionName,
+                collectionName: i.collectionName,
+                displayName: i.displayName || (i.collectionName && i.collectionName.startsWith(prefix) ? i.collectionName.slice(prefix.length) : i.collectionName),
+                type: i.type || null,
+                readable: typeof i.readable === 'boolean' ? i.readable : true,
+              })),
           ];
           setAvailableCollections(list);
           setSelectedCollection(targetCollection);
@@ -490,15 +533,37 @@ export function App() {
         selectedCollection={selectedCollection}
         onSelectCollection={async (collectionName) => {
           if (!collectionName) return;
+          console.log('App: onSelectCollection called ->', collectionName);
           setSelectedCollection(collectionName);
           setIsLoadingMappings(true);
           try {
             if (collectionName === 'mappings') {
+              console.log('App: loading main mappings for user', currentUser?.uid);
               const userMappings = await getUserMappings(currentUser.uid);
+              console.log('App: loaded user mappings count ->', Array.isArray(userMappings) ? userMappings.length : 0);
+              try { console.log('App: sample user mapping ->', Array.isArray(userMappings) && userMappings.length ? JSON.parse(JSON.stringify(userMappings[0])) : null); } catch (e) { /* ignore */ }
               setMappings(userMappings);
             } else {
-              const colMappings = await getMappingsFromCollection(collectionName);
-              setMappings(colMappings);
+              try {
+                console.log('App: loading import collection ->', collectionName);
+                const colMappings = await getMappingsFromCollection(collectionName);
+                console.log('App: loaded collection', collectionName, 'count ->', Array.isArray(colMappings) ? colMappings.length : 0);
+                try { console.log('App: sample import mapping ->', Array.isArray(colMappings) && colMappings.length ? JSON.parse(JSON.stringify(colMappings[0])) : null); } catch (e) { /* ignore */ }
+                setMappings(colMappings);
+              } catch (err) {
+                // If Firestore denies permission, show a friendly toast but DO NOT clear existing mappings
+                const msg = String(err?.message || '').toLowerCase();
+                if (msg.includes('permission') || msg.includes('insufficient') || msg.includes('missing')) {
+                  setToastTick((t) => t + 1);
+                  setToast({ type: 'error', message: 'You do not have permission to view that import collection.' });
+                  console.log('App: permission denied when loading collection ->', collectionName);
+                  // Keep previous `mappings` so the UI doesn't flash empty then disappear
+                } else {
+                  console.error('Error loading selected collection', err);
+                  // For non-permission errors, clear mappings to reflect lack of data
+                  setMappings([]);
+                }
+              }
             }
           } catch (err) {
             console.error('Error loading selected collection', err);
