@@ -35,6 +35,31 @@ const splitListValue = (value) => {
     .filter(Boolean);
 };
 
+const canonicalRegion = (regionValue) => {
+  const raw = String(regionValue || '').trim();
+  if (!raw) return '';
+  const v = raw.toUpperCase();
+  if (v.includes('CORDILLERA') || v === 'CAR') return 'CAR';
+  const romanMatch = v.match(/REGION\s*(XIII|XII|XI|X|IX|VIII|VII|VI|V|IV|III|II|I)(?:\s*[-–]\s*(A|B))?/i);
+  if (romanMatch) {
+    const numeral = romanMatch[1].toUpperCase();
+    const suffix = romanMatch[2] ? romanMatch[2].toUpperCase() : null;
+    if (numeral === 'IV' && suffix) return `Region IV-${suffix}`;
+    return `Region ${numeral}`;
+  }
+  const numericMatch = v.match(/REGION\s*(\d{1,2})(?:\s*[-–]?\s*([AB]))?/i) || v.match(/\b(\d{1,2})(?:\s*[-–]?\s*([AB]))?\b/);
+  if (numericMatch) {
+    const numberValue = Number(numericMatch[1]);
+    const suffix = numericMatch[2] ? numericMatch[2].toUpperCase() : null;
+    if (numberValue === 4 && suffix) return `Region IV-${suffix}`;
+    if (numberValue >= 1 && numberValue <= 13) {
+      const romanMap = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII'];
+      return `Region ${romanMap[numberValue - 1]}`;
+    }
+  }
+  return raw;
+};
+
 export async function POST(request) {
   try {
     const formData = await request.formData();
@@ -100,7 +125,9 @@ export async function POST(request) {
       return fallbackNonEmpty >= 2 ? fallbackIndex : -1;
     };
 
+    const sheetResults = [];
     for (const sheetName of sheetNames) {
+      const sheetResult = { sheetName, headers: [], headerMap: null, parsed: 0, error: null };
       const ws = wb.Sheets[sheetName];
       if (!ws) continue;
       const allRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
@@ -109,11 +136,14 @@ export async function POST(request) {
       const headerRowIndex = findHeaderRowIndex(allRows);
       if (headerRowIndex === -1) {
         // skip sheet if cannot find header
+        sheetResult.error = 'no-header';
+        sheetResults.push(sheetResult);
         continue;
       }
 
       const headerRow = allRows[headerRowIndex].map(normalizeHeader);
       const headerRowOriginal = allRows[headerRowIndex].map((h) => String(h || '').trim());
+      sheetResult.headers = headerRowOriginal;
 
       // Map header strings to canonical field names when possible
       const mapHeaderToField = (h) => {
@@ -134,6 +164,7 @@ export async function POST(request) {
       };
 
       const headerMap = headerRowOriginal.map((h) => mapHeaderToField(h));
+      sheetResult.headerMap = headerMap;
 
       const colIndex = (candidates) => headerRow.findIndex((h) => {
         const compact = compactHeader(h);
@@ -216,6 +247,13 @@ export async function POST(request) {
 
       if (!hasLocationFormat && [surveyIdx, provinceIdx, municipalityIdx, barangayIdx, areaIdx, iccIdx, remarksIdx].some((idx) => idx === -1)) {
         // invalid headers for this sheet — skip
+        sheetResult.error = 'invalid-headers';
+        // attach what we found for debugging
+        sheetResult.found = headerRowOriginal;
+        sheetResult.fieldMap = headerMap;
+        // store result and continue
+        // eslint-disable-next-line no-continue
+        sheetResults.push(sheetResult);
         continue;
       }
 
@@ -236,12 +274,13 @@ export async function POST(request) {
             totalArea: current.totalArea,
             icc: current.icc,
             remarks: current.remarks,
-            region: sheetName,
+            region: canonicalRegion(sheetName),
           };
           try {
             // eslint-disable-next-line no-await-in-loop
             await addMappingToCollection(targetCollection, doc);
             uploaded += 1;
+            sheetResult.parsed += 1;
           } catch (err) {
             errors.push({ sheet: sheetName, row: current, message: String(err?.message || err) });
           }
@@ -314,21 +353,23 @@ export async function POST(request) {
             totalArea,
             icc,
             remarks,
-            region: regionCell || sheetName,
+            region: canonicalRegion(regionCell || sheetName),
           };
 
           try {
             // eslint-disable-next-line no-await-in-loop
             await addMappingToCollection(targetCollection, doc);
             uploaded += 1;
+            sheetResult.parsed += 1;
           } catch (err) {
             errors.push({ sheet: sheetName, row: doc, message: String(err?.message || err) });
           }
         }
+        sheetResults.push(sheetResult);
       }
     }
 
-    return NextResponse.json({ uploaded, errors }, { status: 200 });
+    return NextResponse.json({ uploaded, errors, targetCollection, sheets: sheetResults }, { status: 200 });
   } catch (err) {
     return NextResponse.json({ error: String(err?.message || err) }, { status: 500 });
   }

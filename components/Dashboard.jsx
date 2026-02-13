@@ -147,6 +147,35 @@ export function Dashboard({
     return null;
   };
 
+  const formatProjectCostForDisplay = (m) => {
+    const raw = extractProjectCostValue(m);
+    const parsed = parseProjectCost(raw);
+    if (parsed === 0 && (raw === 0 || raw === '' || raw === null || raw === undefined)) return '-';
+    return `₱${parsed.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+
+  // Return a canonical region label for UI grouping/display.
+  // Uses detectRegionSheet() then falls back to a trimmed version of the input.
+  const canonicalRegion = (regionValue) => {
+    const raw = String(regionValue || '').trim();
+    if (!raw) return '';
+    const detected = detectRegionSheet(raw);
+    if (detected) return detected;
+    // Normalize common short forms like '1' -> 'Region I', '4A' -> 'Region IV-A'
+    const numMatch = raw.match(/^\s*(\d{1,2})(?:\s*[-–]?\s*([ABab]))?\s*$/);
+    if (numMatch) { 
+      const n = Number(numMatch[1]);
+      const suffix = numMatch[2] ? numMatch[2].toUpperCase() : null;
+      const romanMap = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII'];
+      if (n >= 1 && n <= 13) {
+        if (n === 4 && suffix) return `Region IV-${suffix}`;
+        return `Region ${romanMap[n - 1]}`;
+      }
+    }
+    // return trimmed original as last-resort
+    return raw;
+  };
+
   const formatMunicipalitiesExport = (mapping) => (
     mapping.municipality || (Array.isArray(mapping.municipalities) ? mapping.municipalities.join(', ') : '')
   );
@@ -215,7 +244,11 @@ export function Dashboard({
     };
 
     if (h === 'no.' || h === 'survey number') return getField(['surveyNumber', 'survey_number', 'controlNumber', 'control_number']) || '-';
-    if (h === 'region') return getField(['region', 'regionName', 'region_name']) || '-';
+    if (h === 'region') {
+      const raw = getField(['region', 'regionName', 'region_name']);
+      const canon = canonicalRegion(raw || mapping.region);
+      return canon || '-';
+    }
     if (h === 'control number') return getField(['controlNumber', 'control_number', 'surveyNumber', 'survey_number']) || '-';
     if (h.includes('applicant') || h.includes('proponent')) return getField(['proponent', 'applicantProponent', 'applicant_proponent', 'applicant', 'applicant_name', 'applicantName']) || '-';
     if (h.includes('name of project') || (h.includes('name') && !h.includes('region'))) return getField(['nameOfProject', 'name_of_project', 'projectName', 'project_name', 'name', 'title']) || '-';
@@ -329,7 +362,7 @@ export function Dashboard({
   const computeSummaryRows = (records = []) => {
     const regionMap = new Map();
     records.forEach((m) => {
-      const region = (m.region || 'Unknown').toString();
+      const region = (canonicalRegion(m.region) || 'Unknown').toString();
       if (!regionMap.has(region)) {
         regionMap.set(region, {
           region,
@@ -352,10 +385,71 @@ export function Dashboard({
       }
       const obj = regionMap.get(region);
       obj.total += 1;
-      const inc = (k) => {
-        const v = m[k];
-        if (v !== null && typeof v !== 'undefined' && String(v).trim() !== '') obj[k] += 1;
+
+      // Robust field lookup to support imported header variants.
+      // Tries direct key, underscored key, normalized/compact matches against existing keys,
+      // and a fuzzy fallback that searches any key containing meaningful words from keyName.
+      const lookupVal = (record, keyName) => {
+        if (!record || !keyName) return null;
+
+        const isNonEmpty = (v) => (v !== null && typeof v !== 'undefined' && String(v).trim() !== '');
+
+        // direct
+        if (Object.prototype.hasOwnProperty.call(record, keyName) && isNonEmpty(record[keyName])) return record[keyName];
+
+        // underscored variant
+        const underscored = String(keyName).trim().replace(/\s+/g, '_');
+        if (Object.prototype.hasOwnProperty.call(record, underscored) && isNonEmpty(record[underscored])) return record[underscored];
+
+        // normalized & compact comparison
+        const targetNorm = String(keyName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        for (const orig of Object.keys(record || {})) {
+          const on = String(orig || '').toLowerCase();
+          const compact = on.replace(/[^a-z0-9]/g, '');
+          if (on.includes(keyName.toLowerCase()) || keyName.toLowerCase().includes(on) || compact === targetNorm) {
+            const v = record[orig];
+            if (isNonEmpty(v)) return v;
+          }
+        }
+
+        // Fuzzy fallback: split the keyName into words and try to find any record key
+        // that contains at least one substantial word (length > 3) from keyName.
+        const words = String(keyName || '')
+          .replace(/([A-Z])/g, ' $1') // split camelCase
+          .replace(/[^a-zA-Z0-9\s]/g, ' ')
+          .toLowerCase()
+          .split(/\s+/)
+          .map((w) => w.trim())
+          .filter(Boolean)
+          .filter((w) => w.length > 3);
+
+        if (words.length > 0) {
+          for (const orig of Object.keys(record || {})) {
+            const on = String(orig || '').toLowerCase();
+            for (const w of words) {
+              if (on.includes(w)) {
+                const v = record[orig];
+                if (isNonEmpty(v)) return v;
+              }
+            }
+          }
+        }
+
+        return null;
       };
+
+      const inc = (k) => {
+        const v = lookupVal(m, k);
+        if (!v) return;
+        if (Array.isArray(v)) {
+          if (v.length > 0) obj[k] += 1;
+        } else if (typeof v === 'number') {
+          if (v !== 0) obj[k] += 1;
+        } else if (String(v).trim() !== '') {
+          obj[k] += 1;
+        }
+      };
+
       inc('issuanceOfWorkOrder');
       inc('preFBIConference');
       inc('conductOfFBI');
@@ -502,6 +596,24 @@ export function Dashboard({
         // normalized header match
         const nk = normalizeHeader(dk);
         if (normalizedMap[nk]) return formatVal(normalizedMap[nk]);
+        // Check preserved raw_fields if present (exact CSV column values)
+        try {
+          if (m && m.raw_fields && typeof m.raw_fields === 'object') {
+            const candidateKeys = [
+              dk,
+              s,
+              nk,
+              dk.replace(/\s+/g, '_').toLowerCase(),
+            ];
+            for (const ck of candidateKeys) {
+              if (!ck) continue;
+              const safe = String(ck).trim().replace(/\s+/g, '_').replace(/[^A-Za-z0-9_]/g, '_').toLowerCase();
+              if (Object.prototype.hasOwnProperty.call(m.raw_fields, safe) && m.raw_fields[safe]) return String(m.raw_fields[safe]);
+            }
+          }
+        } catch (e) {
+          // ignore raw_fields lookup errors
+        }
         // try compacted key (letters+digits only)
         const ck = compactHeader(dk);
         for (const orig of Object.keys(m || {})) {
@@ -535,6 +647,16 @@ export function Dashboard({
             if (fv) return fv;
           }
         }
+
+        // FINAL FALLBACK: return the first non-empty raw field value from the document
+        // (exclude internal/meta fields) so the UI shows the actual CSV content.
+        const metaKeys = new Set(['id','_ongoing','importCollection','import_batch_id','import_batch','imported_at','source_sheet']);
+        for (const orig of Object.keys(m || {})) {
+          if (metaKeys.has(orig)) continue;
+          const fv = formatVal(m[orig]);
+          if (fv) return fv;
+        }
+
         return '-';
       }
     }
@@ -573,7 +695,7 @@ export function Dashboard({
   const regionOptions = React.useMemo(() => {
     const set = new Set();
     mappings.forEach((m) => {
-      if (m.region) set.add(m.region);
+      if (m.region) set.add(canonicalRegion(m.region) || m.region);
     });
     const ordered = REGION_SHEETS.filter((r) => set.has(r));
     const extras = Array.from(set).filter((r) => !REGION_SHEETS.includes(r)).sort();
@@ -595,7 +717,7 @@ export function Dashboard({
       if (ic && ic.includes('ongoing')) return false;
     }
     const query = searchQuery.toLowerCase();
-    if (regionFilter !== 'all' && mapping.region !== regionFilter) return false;
+    if (regionFilter !== 'all' && canonicalRegion(mapping.region) !== regionFilter) return false;
     if (remarksFilter === 'with' && String(mapping.remarks || '').trim() === '') return false;
     if (remarksFilter === 'none' && String(mapping.remarks || '').trim() !== '') return false;
     return (
@@ -974,8 +1096,9 @@ export function Dashboard({
         const dataRows = rows.slice(headerRowIndex + 1);
 
         dataRows.forEach((row) => {
-          // Build Firestore document using schema
-          const doc = buildFirestoreDocument(row, fieldMap, sheetName, batchId);
+          // Build Firestore document using schema; also pass original header names
+          // so the document contains a `raw_fields` object with exact CSV values.
+          const doc = buildFirestoreDocument(row, fieldMap, sheetName, batchId, headerRowOriginal);
           
           // Override region if not present in data
           if (!doc.region) {
@@ -1085,9 +1208,10 @@ export function Dashboard({
       let options = { mode, onProgress: (p) => setImportProgress(p), targetTab: activeTab };
       let forcedOngoingCollection = null;
       try {
-        const userEmail = (user?.email || '').toLowerCase();
-        if (userEmail === 'ncip@inventory.gov.ph' && activeTab === 'ongoing') {
-          // Force newCollection mode and use a dedicated ongoing collection name
+        // If the import was initiated while the user was on the Ongoing tab,
+        // default to creating a dedicated ongoing collection so that uploads
+        // appear only under Ongoing. Apply this behavior for all users.
+        if (activeTab === 'ongoing') {
           const uid = user?.uid || 'anon';
           forcedOngoingCollection = `mappings_ongoing_${uid}`;
           options = { ...options, mode: 'newCollection', collectionName: forcedOngoingCollection, forceOngoing: true };
@@ -1335,19 +1459,66 @@ export function Dashboard({
     return Number.isFinite(n) ? n : 0;
   };
 
+  // Try to extract a sensible project cost value from a mapping document by
+  // checking common aliases and any field name that contains 'cost'.
+  const extractProjectCostValue = (m) => {
+    if (!m || typeof m !== 'object') return 0;
+
+    const candidates = [];
+    // common aliases
+    candidates.push(m.projectCost, m.project_cost, m.cost, m.project_cost_php, m.totalProjectCost, m.total_project_cost);
+
+    // scan any other keys that include 'cost'
+    Object.keys(m).forEach((k) => {
+      if (k && k.toLowerCase().includes('cost')) {
+        candidates.push(m[k]);
+      }
+    });
+
+    for (const v of candidates) {
+      if (v === null || v === undefined || v === '') continue;
+      if (Array.isArray(v)) {
+        if (v.length === 0) continue;
+        return v[0];
+      }
+      return v;
+    }
+
+    return 0;
+  };
+
   const totalProjectCostNumber = mappings.reduce((sum, m) => {
-    return sum + parseProjectCost(m.projectCost || m.project_cost || m.cost || 0);
+    return sum + parseProjectCost(extractProjectCostValue(m));
   }, 0);
 
-  const approvedCount = mappings.filter(m => {
-    const status = String(m.cadtStatus || m.cadt_status || '').toLowerCase();
-    return status.includes('approved') || status.includes('registered') || status.includes('awarded');
-  }).length;
+  // Treat any mapping explicitly flagged as ongoing as Ongoing; everything else is Approved.
+  // This is a sensible default when imported rows don't include explicit approval/status columns.
+  const ongoingCount = Array.isArray(mappings) ? mappings.filter((m) => isOngoingMapping(m)).length : 0;
+  const approvedCount = Array.isArray(mappings) ? mappings.filter((m) => !isOngoingMapping(m)).length : 0;
 
-  const ongoingCount = mappings.filter(m => {
-    const status = String(m.cadtStatus || m.cadt_status || '').toLowerCase();
-    return status.includes('on process') || status.includes('for processing') || status.includes('processing');
-  }).length;
+  // Diagnostic logging: show breakdown of how ongoing is being counted
+  try {
+    const total = Array.isArray(mappings) ? mappings.length : 0;
+    const flagged = Array.isArray(mappings) ? mappings.filter((m) => m && (m._ongoing === true || String(m._ongoing || '').toLowerCase() === 'true')).length : 0;
+    const importColMatches = Array.isArray(mappings) ? mappings.filter((m) => String(m.importCollection || '').toLowerCase().includes('ongoing')).length : 0;
+    const perCollection = {};
+    if (Array.isArray(mappings)) {
+      mappings.forEach((m) => {
+        const c = m && m.importCollection ? String(m.importCollection) : '<none>';
+        perCollection[c] = (perCollection[c] || 0) + 1;
+      });
+    }
+
+    console.groupCollapsed('Dashboard diagnostics: Ongoing count breakdown');
+    console.log('total mappings:', total);
+    console.log('isOngoingMapping (filtered) count:', ongoingCount);
+    console.log('_ongoing === true count:', flagged);
+    console.log('importCollection includes "ongoing" count:', importColMatches);
+    console.log('per importCollection counts (sample):', perCollection);
+    console.groupEnd();
+  } catch (e) {
+    console.warn('Dashboard diagnostics logging failed', e);
+  }
 
   const stats = {
     totalMappings: mappings.length,
@@ -1515,6 +1686,8 @@ export function Dashboard({
                 )}
                 <p className="text-sm mb-2">Do you want to <strong>add</strong> these records into the existing database or <strong>create a new set</strong>?</p>
                 <p className="text-xs text-white/70 mb-2">If your Excel file has a different format, choose Create new and review results first.</p>
+
+                
               </div>
 
               <div className="px-4 sm:px-6 py-3 border-t border-white/15 flex flex-col items-stretch gap-3 bg-white/5">
@@ -2633,7 +2806,7 @@ export function Dashboard({
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Project Cost</p>
-                        <p className="text-white mt-1">{selectedMapping.projectCost || '-'}</p>
+                        <p className="text-white mt-1">{selectedMapping ? formatProjectCostForDisplay(selectedMapping) : '-'}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">CADT Status</p>

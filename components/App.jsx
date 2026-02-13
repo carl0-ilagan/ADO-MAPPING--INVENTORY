@@ -303,11 +303,12 @@ export function App() {
         setToast({ type: 'success', message: finalMessage });
         onProgress(100);
 
-        if (!fallbackFlat) {
+            if (!fallbackFlat) {
             try {
             const meta = { count: createdFlat, displayName: targetDisplayName };
-            // If the caller requested forcing into an ongoing collection, persist that metadata
-            if (options && options.forceOngoing) meta.type = 'ongoing';
+            // If the caller requested forcing into an ongoing collection, or the
+            // import originated from the ongoing tab, persist that metadata
+            if (options && (options.forceOngoing || options.targetTab === 'ongoing')) meta.type = 'ongoing';
             await registerImportCollection(currentUser.uid, targetCollection, meta);
             const imports = await getUserImportCollections(currentUser.uid);
             const prefix = `mappings_import_${currentUser.uid}_`;
@@ -389,9 +390,9 @@ export function App() {
           totalArea: record.totalArea || 0,
         };
         // If the import was initiated while the user was on the 'ongoing' tab,
-        // and the current user is the NCIP account, mark imported mappings
-        // with an internal flag so the Dashboard can show them in the Ongoing view.
-        if (options && options.targetTab === 'ongoing' && String(currentUser.email || '').toLowerCase() === 'ncip@inventory.gov.ph') {
+        // mark imported mappings with an internal flag so the Dashboard shows
+        // them in the Ongoing view. Apply to all users (not just NCIP).
+        if (options && options.targetTab === 'ongoing') {
           newMapping._ongoing = true;
         }
 
@@ -445,10 +446,10 @@ export function App() {
       onProgress(100);
 
       // If we created a real new collection (no fallback), register and load it
-      if (!fallbackToMappings && mode === 'newCollection' && targetCollection) {
+        if (!fallbackToMappings && mode === 'newCollection' && targetCollection) {
           try {
           const meta = { count: createdCount, displayName: targetDisplayName };
-          if (options && options.forceOngoing) meta.type = 'ongoing';
+        if (options && (options.forceOngoing || options.targetTab === 'ongoing')) meta.type = 'ongoing';
           await registerImportCollection(currentUser.uid, targetCollection, meta);
           const imports = await getUserImportCollections(currentUser.uid);
           const prefix = `mappings_import_${currentUser.uid}_`;
