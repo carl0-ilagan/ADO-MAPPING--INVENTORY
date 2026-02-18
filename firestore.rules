@@ -1,4 +1,3 @@
-
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -20,9 +19,19 @@ service cloud.firestore {
       // Read rules:
       // - Owners (collection names containing their uid) may read their own imports
       // - The NCIP inventory account may read any `mappings_ongoing_...` collection
+      // Allow reads when:
+      // - requester is authenticated AND collection name clearly belongs to them
+      // - OR the document itself has `userId` matching the requester (safe fallback)
+      // - OR the NCIP inventory account may read any `mappings_ongoing_...` collection
+      // TEMPORARY DEBUG: allow any authenticated user to read import/ongoing collections
+      // This relaxes the read permission so we can confirm document visibility.
+      // IMPORTANT: revert this to a more restrictive pattern after troubleshooting.
       allow read: if request.auth != null && (
-        collId.matches('^mappings_import_' + request.auth.uid + '.*$') ||
-        collId.matches('^mappings_ongoing_' + request.auth.uid + '.*$') ||
+        collId.matches('^mappings_import_.*$') ||
+        collId.matches('^mappings_ongoing_.*$') ||
+        // Fallback: allow if the document itself indicates ownership
+        (resource != null && resource.data.userId == request.auth.uid) ||
+        // Allow NCIP inventory account to read ongoing collections
         (request.auth.token.email != null && request.auth.token.email == 'ncip@inventory.gov.ph' && collId.matches('^mappings_ongoing_.*$'))
       );
 

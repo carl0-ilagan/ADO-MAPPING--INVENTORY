@@ -26,6 +26,7 @@ import {
   buildFirestoreDocument,
   isValidRow,
 } from '@/lib/firestoreSchema';
+import { updateMapping as updateMappingClient, updateDocumentInCollection } from '@/lib/firebaseDB.js';
 
 export function Dashboard({
   user,
@@ -41,9 +42,12 @@ export function Dashboard({
   onClearExternalAlert = () => {},
   mappings = [],
   onImportMappings = () => {},
+  onPreviewImport = () => {},
   availableCollections = [{ id: 'mappings', collectionName: 'mappings' }],
   selectedCollection = 'mappings',
   onSelectCollection = () => {},
+  mainMappings = undefined,
+  treatStatusAsOngoing = false,
 }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -78,6 +82,8 @@ export function Dashboard({
   const [showClearAllModal, setShowClearAllModal] = useState(false);
   const [isClosingClearAllModal, setIsClosingClearAllModal] = useState(false);
   const [isClearingAll, setIsClearingAll] = useState(false);
+  const [isClearingOngoingFlags, setIsClearingOngoingFlags] = useState(false);
+  const [isBatchTagging, setIsBatchTagging] = useState(false);
   const fileInputRef = useRef(null);
   const itemsPerPage = 15;
 
@@ -394,28 +400,45 @@ export function Dashboard({
 
         const isNonEmpty = (v) => (v !== null && typeof v !== 'undefined' && String(v).trim() !== '');
 
-        // direct
+        // direct property match
         if (Object.prototype.hasOwnProperty.call(record, keyName) && isNonEmpty(record[keyName])) return record[keyName];
 
         // underscored variant
         const underscored = String(keyName).trim().replace(/\s+/g, '_');
         if (Object.prototype.hasOwnProperty.call(record, underscored) && isNonEmpty(record[underscored])) return record[underscored];
 
-        // normalized & compact comparison
-        const targetNorm = String(keyName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        // compact comparator: letters+digits only
+        const compact = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const targetNorm = compact(keyName);
+
         for (const orig of Object.keys(record || {})) {
           const on = String(orig || '').toLowerCase();
-          const compact = on.replace(/[^a-z0-9]/g, '');
-          if (on.includes(keyName.toLowerCase()) || keyName.toLowerCase().includes(on) || compact === targetNorm) {
+          const oc = compact(on);
+          if (oc === targetNorm || on.includes(keyName.toLowerCase()) || keyName.toLowerCase().includes(on) || oc.includes(targetNorm) || targetNorm.includes(oc)) {
             const v = record[orig];
             if (isNonEmpty(v)) return v;
           }
         }
 
-        // Fuzzy fallback: split the keyName into words and try to find any record key
-        // that contains at least one substantial word (length > 3) from keyName.
+        // raw_fields (preserved CSV columns) can contain canonical names
+        try {
+          if (record && record.raw_fields && typeof record.raw_fields === 'object') {
+            for (const rk of Object.keys(record.raw_fields)) {
+              const rv = record.raw_fields[rk];
+              if (!isNonEmpty(rv)) continue;
+              const rkc = compact(rk);
+              if (rkc === targetNorm || rkc.includes(targetNorm) || targetNorm.includes(rkc) || String(rk).toLowerCase().includes(String(keyName).toLowerCase())) {
+                return rv;
+              }
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+
+        // Fuzzy fallback: split camelCase and punctuation and try to match substantial words (>3 chars)
         const words = String(keyName || '')
-          .replace(/([A-Z])/g, ' $1') // split camelCase
+          .replace(/([A-Z])/g, ' $1')
           .replace(/[^a-zA-Z0-9\s]/g, ' ')
           .toLowerCase()
           .split(/\s+/)
@@ -438,15 +461,35 @@ export function Dashboard({
         return null;
       };
 
-      const inc = (k) => {
-        const v = lookupVal(m, k);
-        if (!v) return;
-        if (Array.isArray(v)) {
-          if (v.length > 0) obj[k] += 1;
-        } else if (typeof v === 'number') {
-          if (v !== 0) obj[k] += 1;
-        } else if (String(v).trim() !== '') {
-          obj[k] += 1;
+      const FIELD_ALIASES = {
+        issuanceOfWorkOrder: ['issuanceOfWorkOrder', 'issuance of work order', 'issuance_of_work_order', 'issuanceworkorder', 'issuance_work_order'],
+        preFBIConference: ['preFBIConference', 'pre-fbi conference', 'pre_fbi_conference', 'prefbiconference'],
+        conductOfFBI: ['conductOfFBI', 'conduct of fbi', 'conduct_fbi', 'conductfbi'],
+        reviewOfFBIReport: ['reviewOfFBIReport', 'review of fbi report', 'review_fbi_report', 'reviewfbireport'],
+        preFPICConference: ['preFPICConference', 'pre-fpic conference', 'pre_fpic_conference', 'prefpicconference'],
+        firstCommunityAssembly: ['firstCommunityAssembly', '1st community assembly', 'first_community_assembly', 'firstcommunityassembly'],
+        secondCommunityAssembly: ['secondCommunityAssembly', '2nd community assembly', 'second_community_assembly', 'secondcommunityassembly'],
+        consensusBuildingDecision: ['consensusBuildingDecision', 'consensus building & decision meeting', 'consensus_building_decision', 'consensusbuildingdecision'],
+        moaValidationRatificationSigning: ['moaValidationRatificationSigning', 'moa validation ratification signing', 'moa_validation_ratification_signing', 'moavalidationratificationsigning'],
+        issuanceResolutionOfConsent: ['issuanceResolutionOfConsent', 'issuance of resolution of consent', 'issuance_resolution_of_consent', 'issuanceresolutionofconsent'],
+        reviewByRRT: ['reviewByRRT', 'review of the fpic report by rrt', 'review_by_rrt', 'reviewbyrrt'],
+        reviewByADOorLAO: ['reviewByADOorLAO', 'review of the fpic report by ado & lao', 'review_by_ado_or_lao', 'reviewbyadoorlao'],
+        forComplianceOfFPICTeam: ['forComplianceOfFPICTeam', 'for compliance of fpic team', 'for_compliance_of_fpic_team', 'forcomplianceoffpicteam'],
+        cebDeliberation: ['cebDeliberation', 'ceb deliberation', 'ceb_deliberation', 'cebdeliberation'],
+      };
+
+      const inc = (keyName) => {
+        const aliases = Array.isArray(FIELD_ALIASES[keyName]) ? FIELD_ALIASES[keyName] : [keyName];
+        for (const alias of aliases) {
+          const v = lookupVal(m, alias);
+          if (!v) continue;
+          if (Array.isArray(v)) {
+            if (v.length > 0) { obj[keyName] += 1; return; }
+          } else if (typeof v === 'number') {
+            if (v !== 0) { obj[keyName] += 1; return; }
+          } else if (String(v).trim() !== '') {
+            obj[keyName] += 1; return;
+          }
         }
       };
 
@@ -465,7 +508,9 @@ export function Dashboard({
       inc('forComplianceOfFPICTeam');
       inc('cebDeliberation');
     });
-    return Array.from(regionMap.values()).sort((a, b) => (b.total || 0) - (a.total || 0));
+    const rows = Array.from(regionMap.values()).sort((a, b) => (b.total || 0) - (a.total || 0));
+    try { console.debug('Dashboard: computeSummaryRows ->', { inputCount: records.length, rows }); } catch (e) { /* ignore */ }
+    return rows;
   };
 
   const currentOngoingTab = ONGOING_SUBTABS.find((s) => s.id === ongoingSubTab) || ONGOING_SUBTABS[0];
@@ -496,9 +541,11 @@ export function Dashboard({
     if (m._ongoing === true || String(m._ongoing || '').toLowerCase() === 'true') return true;
     // import collection marker
     if (String(m.importCollection || '').toLowerCase().includes('ongoing')) return true;
-    // status keywords (align with stats.ongoing logic)
-    const status = String(m.cadtStatus || m.cadt_status || '').toLowerCase();
-    if (status.includes('on process') || status.includes('for processing') || status.includes('processing')) return true;
+    // optionally treat status keywords as ongoing (disabled by default)
+    if (treatStatusAsOngoing) {
+      const status = String(m.cadtStatus || m.cadt_status || '').toLowerCase();
+      if (status.includes('on process') || status.includes('for processing') || status.includes('processing')) return true;
+    }
     return false;
   };
 
@@ -1049,7 +1096,7 @@ export function Dashboard({
         return fallbackNonEmpty >= 2 ? fallbackIndex : -1;
       };
 
-      const buildRecordsFromRows = (rows, sheetName) => {
+      const buildRecordsFromRows = (rows, sheetName, sourceName) => {
         const headerRowIndex = findHeaderRowIndex(rows);
         if (headerRowIndex === -1) return { records: [], rawRecords: [], error: 'no-header', sheetName };
 
@@ -1071,7 +1118,9 @@ export function Dashboard({
         // Use schema-based field mapping (header tokens, not indexes)
         const fieldMap = mapHeadersToFields(headerRowOriginal);
         
-        // Require at least one core field to be mapped
+        // Require at least one core field to be mapped. If none are found,
+        // attempt a safe fallback: build documents using the raw headers as keys
+        // so differently-formatted sheets still produce previewable records.
         const hasCoreField = (
           fieldMap.control_number !== undefined ||
           fieldMap.survey_number !== undefined ||
@@ -1080,14 +1129,60 @@ export function Dashboard({
         );
 
         if (!hasCoreField) {
-          console.error(`❌ Sheet "${sheetName}" - No core fields mapped!`, { fieldMap, headers: headerRowOriginal });
-          return { records: [], rawRecords, error: 'invalid-headers', sheetName, found: headerRowOriginal };
+          console.warn(`⚠️ Sheet "${sheetName}" - No core fields mapped, applying raw-header fallback.`, { fieldMap, headers: headerRowOriginal });
+          // Build fallback documents directly from rawRecords, mapping sanitized header names
+          const fallbackRecords = rawRecords.map((r) => {
+            const doc = { rawFallback: true };
+            for (let i = 0; i < headerRowOriginal.length; i += 1) {
+              const key = sanitizeFieldName(headerRowOriginal[i] || `col_${i}`);
+              const val = r[key];
+              // preserve arrays/strings as-is
+              doc[key] = (typeof val === 'string' && val.indexOf(',') >= 0) ? val.split(',').map((s) => s.trim()).filter(Boolean) : val;
+            }
+            // include sheet metadata so UI can show sensible region/source
+            try {
+              doc.source_sheet = sheetName;
+              const detected = detectRegionSheet(sheetName);
+              doc.region = detected || sheetName;
+            } catch (e) {
+              /* ignore */
+            }
+            return doc;
+          }).filter((d) => Object.keys(d).length > 0);
+
+          if (fallbackRecords.length === 0) {
+            return { records: [], rawRecords, error: 'invalid-headers', sheetName, found: headerRowOriginal };
+          }
+
+          console.log(`✅ Sheet "${sheetName}" - Fallback created ${fallbackRecords.length} records from raw headers`);
+          return { records: fallbackRecords, rawRecords, error: null, sheetName, fallback: true };
         }
 
         console.log(`✅ Sheet "${sheetName}" - Core fields found, proceeding with import`);
 
-        // Detect region from sheet name
-        const fallbackRegion = detectRegionSheet(sheetName) || sheetName || '';
+        // Detect region from sheet name, source filename, or by scanning the first rows
+        let fallbackRegion = '';
+        try {
+          const sheetDetected = detectRegionSheet(sheetName);
+          const sourceDetected = sourceName ? detectRegionSheet(sourceName) : null;
+          if (sheetDetected) fallbackRegion = sheetDetected;
+          else if (sourceDetected) fallbackRegion = sourceDetected;
+          else {
+            // Scan first few rows for any cell that looks like a region label
+            outer: for (let r = 0; r < Math.min(10, rows.length); r += 1) {
+              const row = rows[r] || [];
+              for (let c = 0; c < row.length; c += 1) {
+                const cell = String(row[c] || '').trim();
+                if (!cell) continue;
+                const d = detectRegionSheet(cell);
+                if (d) { fallbackRegion = d; break outer; }
+              }
+            }
+          }
+        } catch (e) {
+          fallbackRegion = '';
+        }
+        if (!fallbackRegion) fallbackRegion = (sheetName && sheetName.toLowerCase() !== 'sheet1') ? sheetName : '';
         
         // Generate batch ID for this import
         const batchId = `batch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -1220,10 +1315,11 @@ export function Dashboard({
         // ignore
       }
       if (mode === 'newCollection') {
-        // If we forced an ongoing collection, always use that name regardless
-        // of the user-supplied collection name (prevents overwriting to mappings_import_...)
+        // When creating a new collection, prefer the user-supplied collection name
+        // if provided. If no name is supplied and the import was started from
+        // the Ongoing tab, default to the forced ongoing collection name.
         if (forcedOngoingCollection) {
-          options.collectionName = forcedOngoingCollection;
+          options.collectionName = (collectionName && String(collectionName).trim()) ? String(collectionName).trim() : forcedOngoingCollection;
         } else {
           options.collectionName = collectionName || importCollectionName;
         }
@@ -1487,14 +1583,19 @@ export function Dashboard({
     return 0;
   };
 
-  const totalProjectCostNumber = mappings.reduce((sum, m) => {
+  // For the Overview stats, prefer `mainMappings` (the main 'mappings' collection)
+  // when supplied by the App. Otherwise fall back to the currently loaded `mappings`.
+  const overviewSource = (Array.isArray(mainMappings) && mainMappings.length > 0) ? mainMappings : mappings;
+
+  const totalProjectCostNumber = (activeTab === 'overview' ? overviewSource : mappings).reduce((sum, m) => {
     return sum + parseProjectCost(extractProjectCostValue(m));
   }, 0);
 
   // Treat any mapping explicitly flagged as ongoing as Ongoing; everything else is Approved.
   // This is a sensible default when imported rows don't include explicit approval/status columns.
-  const ongoingCount = Array.isArray(mappings) ? mappings.filter((m) => isOngoingMapping(m)).length : 0;
-  const approvedCount = Array.isArray(mappings) ? mappings.filter((m) => !isOngoingMapping(m)).length : 0;
+  const statsSource = (activeTab === 'overview') ? overviewSource : mappings;
+  const ongoingCount = Array.isArray(statsSource) ? statsSource.filter((m) => isOngoingMapping(m)).length : 0;
+  const approvedCount = Array.isArray(statsSource) ? statsSource.filter((m) => !isOngoingMapping(m)).length : 0;
 
   // Diagnostic logging: show breakdown of how ongoing is being counted
   try {
@@ -1521,10 +1622,10 @@ export function Dashboard({
   }
 
   const stats = {
-    totalMappings: mappings.length,
+    totalMappings: (activeTab === 'overview' ? overviewSource : mappings).length,
     totalProjectCost: totalProjectCostNumber,
     totalProjectCostFormatted: (totalProjectCostNumber === 0) ? '0.00' : `₱${totalProjectCostNumber.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-    regions: new Set(mappings.map((m) => m.region)).size,
+    regions: new Set((activeTab === 'overview' ? overviewSource : mappings).map((m) => m.region)).size,
     approved: approvedCount,
     ongoing: ongoingCount,
   };
@@ -1716,6 +1817,28 @@ export function Dashboard({
                   </button>
                 </div>
 
+                {importPreviewRecords.length > 0 && (
+                  <div className="flex gap-3 w-full mt-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        try {
+                          // Switch to Ongoing tab and provide a lightweight preview display
+                          // of the imported records as ongoing items without persisting them.
+                          setActiveTab('ongoing');
+                          if (typeof onPreviewImport === 'function') onPreviewImport(importPreviewRecords);
+                          setShowImportChoiceModal(false);
+                        } catch (err) {
+                          console.warn('Preview as ongoing failed', err);
+                        }
+                      }}
+                      className="flex-1 px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition"
+                    >
+                      Preview as Ongoing
+                    </button>
+                  </div>
+                )}
+
                 {mappings.length > 0 ? (
                   <div className="w-full">
                     <div className="flex items-center gap-2">
@@ -1846,44 +1969,44 @@ export function Dashboard({
               </div>
 
               <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-                {Array.isArray(availableCollections) && availableCollections.length > 1 && activeTab !== 'ongoing' && activeTab !== 'overview' ? (
+                {Array.isArray(availableCollections) && availableCollections.length > 1 && activeTab !== 'ongoing' ? (
                   <div className="flex items-center gap-2 mr-2">
-                        <label className="sr-only">Collection</label>
-                        <Select
-                          value={dropdownSelections[activeTab === 'ongoing' ? 'ongoing' : 'mappings']}
-                          onValueChange={(value) => {
-                            const key = activeTab === 'ongoing' ? 'ongoing' : 'mappings';
-                            console.log('Dashboard: dropdown changed ->', { key, value, activeTab, selectedCollection });
-                            setDropdownSelections((s) => ({ ...s, [key]: value }));
-                            // If the dropdown change happened on the currently active tab,
-                            // load the collection immediately so the selected data remains visible.
-                            if ((activeTab === 'ongoing' && key === 'ongoing') || (activeTab === 'mappings' && key === 'mappings')) {
-                              // don't trigger load for the placeholder empty entry
-                              if (value && value !== '__none__' && typeof onSelectCollection === 'function') {
-                                console.log('Dashboard: calling onSelectCollection from dropdown ->', value);
-                                onSelectCollection(value);
-                              }
-                            }
-                          }}
-                        >
-                          <SelectTrigger className="relative w-[220px] bg-white/5 text-white/90 text-sm rounded-lg px-3 py-2 border border-white/10">
-                            <SelectValue placeholder="Select collection" />
-                            <div className="absolute inset-0 pointer-events-none flex items-center px-3">
-                              <span className="truncate text-sm text-white/90">{currentSelectionDisplay}</span>
-                            </div>
-                          </SelectTrigger>
-                          <SelectContent className="bg-white border-[#0A2D55]/10 rounded-xl shadow-2xl">
-                            {filteredCollectionsForDropdown.length > 0 ? (
-                              filteredCollectionsForDropdown.map((c) => (
-                                <SelectItem key={c.id} value={c.collectionName}>{c.displayName || c.collectionName}</SelectItem>
-                              ))
-                            ) : (
-                              <SelectItem value="__none__" disabled>
-                                {activeTab === 'ongoing' ? 'No ongoing collections' : 'No collections'}
-                              </SelectItem>
-                            )}
-                          </SelectContent>
-                        </Select>
+                    <label className="sr-only">Collection</label>
+                    <Select
+                      value={dropdownSelections[activeTab === 'ongoing' ? 'ongoing' : 'mappings']}
+                      onValueChange={(value) => {
+                        const key = activeTab === 'ongoing' ? 'ongoing' : 'mappings';
+                        console.log('Dashboard: dropdown changed ->', { key, value, activeTab, selectedCollection });
+                        setDropdownSelections((s) => ({ ...s, [key]: value }));
+                        // If the dropdown change happened on the currently active tab,
+                        // load the collection immediately so the selected data remains visible.
+                        if ((activeTab === 'ongoing' && key === 'ongoing') || (activeTab === 'mappings' && key === 'mappings')) {
+                          // don't trigger load for the placeholder empty entry
+                          if (value && value !== '__none__' && typeof onSelectCollection === 'function') {
+                            console.log('Dashboard: calling onSelectCollection from dropdown ->', value);
+                            onSelectCollection(value);
+                          }
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="relative w-[220px] bg-white/5 text-white/90 text-sm rounded-lg px-3 py-2 border border-white/10">
+                        <SelectValue placeholder="Select collection" />
+                        <div className="absolute inset-0 pointer-events-none flex items-center px-3">
+                          <span className="truncate text-sm text-white/90">{currentSelectionDisplay}</span>
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent className="bg-white border-[#0A2D55]/10 rounded-xl shadow-2xl">
+                        {filteredCollectionsForDropdown.length > 0 ? (
+                          filteredCollectionsForDropdown.map((c) => (
+                            <SelectItem key={c.id} value={c.collectionName}>{c.displayName || c.collectionName}</SelectItem>
+                          ))
+                        ) : (
+                          <SelectItem value="__none__" disabled>
+                            {activeTab === 'ongoing' ? 'No ongoing collections' : 'No collections'}
+                          </SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
                   </div>
                 ) : null}
                 <button
@@ -1894,6 +2017,7 @@ export function Dashboard({
                   <Upload size={16} className="sm:w-4.5 sm:h-4.5" />
                   Upload Excel
                 </button>
+                
                 {mappings.length > 0 && (
                   <button
                     type="button"
@@ -2364,7 +2488,9 @@ export function Dashboard({
         {activeTab === 'ongoing' && (
           <div className="animate-section-1">
             <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 animate-header">
-              <h2 className="text-lg sm:text-2xl font-bold text-[#0A2D55]">Ongoing</h2>
+              <div className="flex items-center gap-3">
+                <h2 className="text-lg sm:text-2xl font-bold text-[#0A2D55]">Ongoing</h2>
+              </div>
             </div>
             {isInventoryUser ? (
               <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-6 overflow-x-auto">
@@ -2427,6 +2553,7 @@ export function Dashboard({
                           )}
                         </tbody>
                       </table>
+                      
                     </div>
                   ) : (
                     <div className="overflow-x-auto">
@@ -2462,6 +2589,7 @@ export function Dashboard({
                           )}
                         </tbody>
                       </table>
+                      
                     </div>
                   )}
                 </>

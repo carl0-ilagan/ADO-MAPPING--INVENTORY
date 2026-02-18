@@ -7,7 +7,7 @@ import { MappingForm } from '@/components/MappingFormClean';
 import { RightSplitModal } from '@/components/RightSplitModal';
 import { ProfilePage } from '@/components/ProfilePage';
 import { onAuthStateChangeListener, signOutUser } from '@/lib/firebaseAuth.js';
-import { getUserMappings, addMapping, deleteMapping, updateMapping, addMappingToCollection, getMappingsFromCollection, registerImportCollection, getUserImportCollections } from '@/lib/firebaseDB.js';
+import { getUserMappings, addMapping, deleteMapping, updateMapping, addMappingToCollection, getMappingsFromCollection, registerImportCollection, getUserImportCollections, updateDocumentInCollection } from '@/lib/firebaseDB.js';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase.js';
 
@@ -16,6 +16,7 @@ export function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [currentView, setCurrentView] = useState('login'); // 'login', 'dashboard', 'search'
   const [mappings, setMappings] = useState([]);
+  const [mainMappings, setMainMappings] = useState([]);
   const [showAddMappingModal, setShowAddMappingModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [isLoadingMappings, setIsLoadingMappings] = useState(false);
@@ -44,6 +45,7 @@ export function App() {
         try {
           const userMappings = await getUserMappings(user.uid);
           setMappings(userMappings);
+          setMainMappings(userMappings);
           // load user's import collections
           try {
               const imports = await getUserImportCollections(user.uid);
@@ -122,6 +124,17 @@ export function App() {
       console.error('Error logging out:', error);
     }
   };
+
+  // Keep `mainMappings` synced whenever the active selection is the main `mappings` collection.
+  useEffect(() => {
+    try {
+      if (String(selectedCollection || '').toLowerCase() === 'mappings') {
+        setMainMappings(mappings || []);
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [mappings, selectedCollection]);
 
   const handleAddMapping = () => {
     setEditingMapping(null);
@@ -276,13 +289,19 @@ export function App() {
         const fallbackTargetMappings = [...mappings];
         for (const doc of flat) {
           try {
-            await addMappingToCollection(targetCollection, { ...doc, userId: currentUser.uid });
+            const shouldForceOngoing = options && (options.forceOngoing || options.targetTab === 'ongoing');
+            const writeDoc = { ...doc, userId: currentUser.uid };
+            if (shouldForceOngoing) writeDoc._ongoing = true;
+            await addMappingToCollection(targetCollection, writeDoc);
             createdFlat += 1;
             } catch (err) {
             const msg = String(err?.message || '').toLowerCase();
             if (msg.includes('permission') || msg.includes('missing') || msg.includes('insufficient')) {
-              const mappingId = await addMapping({ ...doc, importCollection: targetCollection, userId: currentUser.uid });
-              fallbackTargetMappings.push({ id: mappingId, ...doc, importCollection: targetCollection });
+              const shouldForceOngoing = options && (options.forceOngoing || options.targetTab === 'ongoing');
+              const writeDoc = { ...doc, importCollection: targetCollection, userId: currentUser.uid };
+              if (shouldForceOngoing) writeDoc._ongoing = true;
+              const mappingId = await addMapping(writeDoc);
+              fallbackTargetMappings.push({ id: mappingId, ...writeDoc });
               createdFlat += 1;
               fallbackFlat = true;
             } else {
@@ -401,15 +420,21 @@ export function App() {
 
         if (mode === 'newCollection') {
             try {
-            const mappingId = await addMappingToCollection(targetCollection, { ...newMapping });
+            const shouldForceOngoing = options && (options.forceOngoing || options.targetTab === 'ongoing');
+            const writeDoc = { ...newMapping, userId: currentUser.uid };
+            if (shouldForceOngoing) writeDoc._ongoing = true;
+            const mappingId = await addMappingToCollection(targetCollection, writeDoc);
             createdCount += 1;
           } catch (err) {
             // If permission denied for arbitrary collections, fall back to writing into 'mappings'
             const msg = String(err?.message || '').toLowerCase();
             if (msg.includes('permission') || msg.includes('missing') || msg.includes('insufficient')) {
               // write into main `mappings` collection with an importCollection tag so users can find them
-              const mappingId = await addMapping({ ...newMapping, importCollection: targetCollection });
-              nextMappings.push({ id: mappingId, ...newMapping, importCollection: targetCollection });
+              const shouldForceOngoing = options && (options.forceOngoing || options.targetTab === 'ongoing');
+              const writeDoc = { ...newMapping, importCollection: targetCollection };
+              if (shouldForceOngoing) writeDoc._ongoing = true;
+              const mappingId = await addMapping(writeDoc);
+              nextMappings.push({ id: mappingId, ...writeDoc });
               createdCount += 1;
               // flag will be surfaced after loop via toast (see below)
               fallbackToMappings = true;
@@ -434,6 +459,14 @@ export function App() {
 
       setMappings(nextMappings);
       setToastTick((t) => t + 1);
+      // diagnostic: log a sample saved mapping so we can inspect persisted fields
+      try {
+        const sampleSaved = Array.isArray(nextMappings) && nextMappings.length ? nextMappings[0] : null;
+        console.log('IMPORT_DEBUG sampleSavedMapping:', sampleSaved);
+        if (sampleSaved && typeof sampleSaved === 'object') console.log('IMPORT_DEBUG sampleSavedKeys:', Object.keys(sampleSaved));
+      } catch (e) {
+        console.warn('IMPORT_DEBUG failed to log sampleSavedMapping', e);
+      }
       const successMessage = mode === 'newCollection'
         ? `Import complete: ${createdCount} records added to collection ${targetDisplayName || targetCollection}.`
         : `Import complete: ${createdCount} added, ${updatedCount} updated, ${skippedCount} skipped.`;
@@ -464,6 +497,14 @@ export function App() {
                 if (docsArray.some((d) => d && (d._ongoing === true || String(d.importCollection || '').toLowerCase().includes('ongoing') || String(i.collectionName || '').toLowerCase().includes('ongoing')))) {
                   importMeta.type = 'ongoing';
                 }
+                  // If we fell back to writing into `mappings`, ensure the UI shows the mappings collection
+                  if (fallbackToMappings) {
+                    try {
+                      setSelectedCollection('mappings');
+                    } catch (e) {
+                      /* ignore */
+                    }
+                  }
                 importMeta.readable = true;
                 return { importMeta, docsCount: docsArray.length };
               } catch (err) {
@@ -525,10 +566,29 @@ export function App() {
         onEditMapping={handleEditMapping}
         onDeleteMapping={handleDeleteMapping}
         onImportMappings={handleImportMappings}
+        onPreviewImport={async (records = []) => {
+          if (!records || !Array.isArray(records) || records.length === 0) return;
+          try {
+            // Create lightweight preview mappings with temporary ids and ongoing flag
+            const now = Date.now();
+            const previewMappings = records.map((r, idx) => ({
+              id: `preview_${now}_${idx}`,
+              _ongoing: true,
+              importCollection: '__preview__',
+              userId: currentUser.uid,
+              ...r,
+            }));
+            setSelectedCollection('__preview__');
+            setMappings(previewMappings);
+          } catch (err) {
+            console.error('Failed to preview import as ongoing', err);
+          }
+        }}
         externalAlert={toast}
         externalAlertTick={toastTick}
         onClearExternalAlert={() => setToast(null)}
         mappings={mappings}
+        mainMappings={mainMappings}
         isLoadingMappings={isLoadingMappings}
         availableCollections={availableCollections}
         selectedCollection={selectedCollection}
@@ -544,6 +604,7 @@ export function App() {
               console.log('App: loaded user mappings count ->', Array.isArray(userMappings) ? userMappings.length : 0);
               try { console.log('App: sample user mapping ->', Array.isArray(userMappings) && userMappings.length ? JSON.parse(JSON.stringify(userMappings[0])) : null); } catch (e) { /* ignore */ }
               setMappings(userMappings);
+              setMainMappings(userMappings);
             } else {
               try {
                 console.log('App: loading import collection ->', collectionName);
@@ -551,6 +612,34 @@ export function App() {
                 console.log('App: loaded collection', collectionName, 'count ->', Array.isArray(colMappings) ? colMappings.length : 0);
                 try { console.log('App: sample import mapping ->', Array.isArray(colMappings) && colMappings.length ? JSON.parse(JSON.stringify(colMappings[0])) : null); } catch (e) { /* ignore */ }
                 setMappings(colMappings);
+                // If this is an ongoing import collection, ensure documents are flagged
+                // as ongoing in the collection so the Ongoing UI and summary detect them.
+                try {
+                  if (String(collectionName || '').toLowerCase().includes('ongoing') && Array.isArray(colMappings) && colMappings.length) {
+                    (async () => {
+                      console.log('App: background tagging loaded import collection as ongoing ->', collectionName);
+                      const items = colMappings;
+                      const batchSize = 200;
+                      for (let i = 0; i < items.length; i += batchSize) {
+                        const chunk = items.slice(i, i + batchSize);
+                        await Promise.all(chunk.map(async (it) => {
+                          if (!it || !it.id) return;
+                          try {
+                            const needsTag = !(it._ongoing === true || String(it.importCollection || '').toLowerCase().includes('ongoing') || String(it.importCollection || '').toLowerCase() === String(collectionName).toLowerCase());
+                            if (needsTag) {
+                              await updateDocumentInCollection(collectionName, it.id, { _ongoing: true, importCollection: String(collectionName) });
+                            }
+                          } catch (err) {
+                            console.debug('App: background tag failed for', it.id, err?.message || err);
+                          }
+                        }));
+                      }
+                      console.log('App: background tagging complete for', collectionName);
+                    })();
+                  }
+                } catch (bgErr) {
+                  console.warn('App: failed background tagging ongoing collection', bgErr);
+                }
               } catch (err) {
                 // If Firestore denies permission, show a friendly toast but DO NOT clear existing mappings
                 const msg = String(err?.message || '').toLowerCase();
