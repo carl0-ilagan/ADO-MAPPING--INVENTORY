@@ -248,6 +248,8 @@ export default function MappingForm({
   onBack = () => {},
   onSubmit = () => {},
   initialData = null,
+  ongoingMode = false,
+  fixedRegion = null,
   formTitle = "Add New Mapping",
   submitLabel = "Save Mapping",
 }) {
@@ -273,6 +275,69 @@ export default function MappingForm({
   const [totalArea, setTotalArea] = useState("");
   const [remarks, setRemarks] = useState("");
   const [communityBenefits, setCommunityBenefits] = useState("");
+  // Ongoing-mode specific fields
+  const ONGOING_LABELS = [
+    'Name of Proponent',
+    'Name of Project',
+    'Type of project',
+    'Project Location',
+    'Project Area (in hectares)',
+    'Affected Ancestral Domain/s',
+    'Affected ICCs/IPs',
+    'Date of Application',
+    'Review of Application Documents',
+    'Need for FBI?',
+    'Issuance of Work Order',
+    'Pre-FBI Conference',
+    'Approval/ Concurrence of WFP',
+    'Payment of FBI Fee',
+    'Conduct of FBI',
+    'Preparation of FBI Report',
+    'Review of FBI Report',
+    'Issuance of Work Order of FPIC Team',
+    'Pre-FPIC Conference',
+    'Approval of WFP',
+    'Payment of FPIC Fee',
+    'Posting of Notices',
+    '1st Community Assembly',
+    '2nd Community Assembly',
+    'Consensus Building & Decision Meeting',
+    'Proceed to MOA Negotiation?',
+    '(If yes) Issuance of Resolution to proceed to MOA Negotiation',
+    'MOA Negotiation & Preparation',
+    'MOA Validation, Ratification & Signing',
+    'Issuance of Resolution of Consent',
+    'Submission of FPIC Report',
+    'Review of the FPIC Report by RRT',
+    'Review of the FPIC Report by ADO & LAO',
+    'For compliance of FPIC Team/ RO',
+    'CEB Deliberation',
+    'CEB Approved?',
+    '(If yes) Preparation & Signing of CEB Resolution & CP',
+    'Release of CP to the Proponent',
+    'REMARKS'
+  ];
+
+  const sanitizeKey = (label) => (
+    String(label || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+  );
+
+  const toCamel = (s) => {
+    if (!s) return '';
+    const parts = String(s).split(/[_\s]+/).filter(Boolean);
+    if (parts.length === 0) return '';
+    return parts[0].toLowerCase() + parts.slice(1).map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join('');
+  };
+
+  const [ongoingData, setOngoingData] = useState(() => {
+    const obj = {};
+    ONGOING_LABELS.forEach((l) => { obj[sanitizeKey(l)] = ''; });
+    return obj;
+  });
   const [errors, setErrors] = useState({});
   const [isHydrating, setIsHydrating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -284,7 +349,6 @@ export default function MappingForm({
   const [applicantProponent, setApplicantProponent] = useState("");
   const [nameOfProject, setNameOfProject] = useState("");
   const [natureOfProject, setNatureOfProject] = useState("");
-  const [projectCost, setProjectCost] = useState("");
   const [cadtStatus, setCadtStatus] = useState("");
   const [location, setLocation] = useState("");
   const [yearApproved, setYearApproved] = useState("");
@@ -311,6 +375,18 @@ export default function MappingForm({
   };
 
   useEffect(() => {
+    // If a fixed region is provided (from Dashboard ongoing subtab), preselect it
+    if (fixedRegion) {
+      const normalized = normalize(fixedRegion);
+      const fromMap = regionNameMap.get(normalized);
+      if (fromMap) setSelectedRegionCode(fromMap);
+      else {
+        const found = regions.find((r) => normalize(r.name) === normalized);
+        if (found) setSelectedRegionCode(found.code);
+        else setSelectedRegionCode(fixedRegion);
+      }
+    }
+
     if (!alert) return;
     const timeoutId = setTimeout(() => setAlert(null), 10_000);
     return () => clearTimeout(timeoutId);
@@ -417,12 +493,36 @@ export default function MappingForm({
     setApplicantProponent(initialData.applicantProponent || initialData.applicant || initialData.proponent || "");
     setNameOfProject(initialData.nameOfProject || initialData.projectName || "");
     setNatureOfProject(initialData.natureOfProject || initialData.nature || "");
-    setProjectCost(initialData.projectCost || "");
+    
     setCadtStatus(initialData.cadtStatus || initialData.cadt || "");
     setLocation(initialData.location || "");
     setYearApproved(initialData.yearApproved || initialData.year || "");
     setMoaDuration(initialData.moaDuration || initialData.moa_duration || "");
     setCommunityBenefits(initialData.communityBenefits || initialData.community_benefits || "");
+    // Hydrate ongoing fields if provided. Support several shapes:
+    // - nested `initialData.ongoing` (preferred)
+    // - top-level keys (legacy imports)
+    // - values stored inside `raw_fields`
+    try {
+      const od = {};
+      const srcOngoing = (initialData && typeof initialData === 'object' && initialData.ongoing && typeof initialData.ongoing === 'object') ? initialData.ongoing : {};
+      const raw = (initialData && typeof initialData === 'object' && initialData.raw_fields && typeof initialData.raw_fields === 'object') ? initialData.raw_fields : {};
+      ONGOING_LABELS.forEach((l) => {
+        const k = sanitizeKey(l);
+        const camel = toCamel(k);
+        // Prefer nested ongoing values, then camel-case alias, then top-level keys, then raw_fields
+        const val = (typeof srcOngoing[k] !== 'undefined' && srcOngoing[k] !== null && String(srcOngoing[k]).trim() !== '') ? srcOngoing[k]
+          : (typeof srcOngoing[camel] !== 'undefined' && srcOngoing[camel] !== null && String(srcOngoing[camel]).trim() !== '') ? srcOngoing[camel]
+          : (typeof initialData[k] !== 'undefined' && initialData[k] !== null && String(initialData[k]).trim() !== '') ? initialData[k]
+          : (typeof initialData[l] !== 'undefined' && initialData[l] !== null && String(initialData[l]).trim() !== '') ? initialData[l]
+          : (typeof raw[k] !== 'undefined' && raw[k] !== null && String(raw[k]).trim() !== '') ? raw[k]
+          : '';
+        od[k] = val;
+      });
+      setOngoingData((s) => ({ ...s, ...od }));
+    } catch (e) {
+      // ignore
+    }
     
     setErrors({});
 
@@ -497,6 +597,14 @@ export default function MappingForm({
   const validate = () => {
     const e = {};
     
+    // If we're in ongoingMode (adding from the Ongoing tab), allow saving
+    // without the usual province/municipality/barangay requirements. The
+    // ongoing workflow often collects a different set of fields.
+    if (ongoingMode) {
+      setErrors({});
+      return true;
+    }
+
     if (isInventoryUser) {
       // NCIP validation
       if (!controlNumber.trim()) e.controlNumber = "Control Number is required";
@@ -520,9 +628,25 @@ export default function MappingForm({
     setAlert(null);
     setIsSaving(true);
 
-    const regionName = regionMap.get(String(selectedRegionCode)) || selectedRegionCode || "";
+    const regionName = fixedRegion || regionMap.get(String(selectedRegionCode)) || selectedRegionCode || "";
     
     try {
+      // Build a mapped ongoing payload: include sanitized keys and camelCase/common aliases
+      const ongoingPayload = {};
+      if (ongoingMode && ongoingData) {
+        Object.keys(ongoingData).forEach((k) => {
+          const v = ongoingData[k];
+          ongoingPayload[k] = v;
+          const camel = toCamel(k);
+          if (camel) ongoingPayload[camel] = v;
+          if (/proponent/i.test(camel)) ongoingPayload['proponent'] = v;
+          if (camel === 'nameOfProject' || /name.*project/i.test(camel)) ongoingPayload['nameOfProject'] = v;
+          if (camel.includes('area') || camel.includes('hectares')) ongoingPayload['area'] = v;
+          if (camel.includes('location')) ongoingPayload['location'] = v;
+          if (camel.includes('remarks') || camel === 'remarks') ongoingPayload['remarks'] = v;
+        });
+        
+      }
       if (isInventoryUser) {
         // NCIP user submission
         const iccIpNames = Array.from(selectedIccIpCodes);
@@ -533,7 +657,6 @@ export default function MappingForm({
           applicantProponent: applicantProponent.trim(),
           nameOfProject: nameOfProject.trim(),
           natureOfProject: natureOfProject.trim(),
-          projectCost: projectCost.trim(),
           cadtStatus: cadtStatus.trim(),
           icc: iccIpNames,
           location: location.trim(),
@@ -541,6 +664,7 @@ export default function MappingForm({
           moaDuration: moaDuration.trim(),
           communityBenefits: communityBenefits.trim(),
           remarks: remarks.trim(),
+          ...(ongoingMode ? { ongoing: { ...ongoingData, ...ongoingPayload } } : {}),
         });
       } else {
         // Regular user submission
@@ -564,6 +688,7 @@ export default function MappingForm({
           icc: iccIpNames,
           remarks: remarks.trim(),
           totalArea: parseTotalArea(totalArea),
+          ...(ongoingMode ? { ongoing: { ...ongoingData, ...ongoingPayload } } : {}),
         });
       }
 
@@ -585,7 +710,6 @@ export default function MappingForm({
       setApplicantProponent("");
       setNameOfProject("");
       setNatureOfProject("");
-      setProjectCost("");
       setCadtStatus("");
       setLocation("");
       setYearApproved("");
@@ -628,6 +752,8 @@ export default function MappingForm({
               <p className="leading-snug">{alert.message}</p>
             </div>
           </div>
+
+            
         </div>
       )}
       <div className={isModal ? "w-full flex-1 flex flex-col min-h-0" : "max-w-4xl mx-auto px-4 sm:px-6"}>
@@ -644,6 +770,7 @@ export default function MappingForm({
                 <h1 className="font-bold text-xl text-[#0A2D55]">{formTitle}</h1>
                 <p className="text-sm text-[#0A2D55]/55 mt-1">Indigenous Cultural Community mapping record</p>
               </div>
+              
             </div>
           </div>
 
@@ -658,12 +785,35 @@ export default function MappingForm({
                 </div>
               </div>
             </div>
+
+            
           )}
 
           <form onSubmit={handleSave} className="flex-1 flex flex-col min-h-0">
             <div className="flex-1 overflow-y-auto overflow-x-hidden hide-scrollbar p-4 sm:p-7 pb-28 sm:pb-24">
               <div className="space-y-6">
-              {isInventoryUser ? (
+              {ongoingMode ? (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {ONGOING_LABELS.map((label) => {
+                      const key = sanitizeKey(label);
+                      const isRemarks = String(label || '').toLowerCase().includes('remark') || label === 'REMARKS';
+                      return (
+                        <div key={key}>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">{label}</label>
+                          {isRemarks ? (
+                            <textarea value={ongoingData[key] || ''} onChange={(e) => setOngoingData((s) => ({ ...s, [key]: e.target.value }))} rows={3} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
+                          ) : (
+                            <input value={ongoingData[key] || ''} onChange={(e) => setOngoingData((s) => ({ ...s, [key]: e.target.value }))} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  
+                </>
+              ) : (
+                isInventoryUser ? (
                 <>
                   {/* NCIP Inventory User Form */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -673,7 +823,7 @@ export default function MappingForm({
                     </div>
                     <div>
                       <label className="block font-semibold text-[#0A2D55] mb-2">Region <span className="text-red-500">*</span></label>
-                      <SearchableSelect options={regions} selected={selectedRegionCode} onChange={(c) => setSelectedRegionCode(c)} placeholder="Select region" />
+                      <SearchableSelect options={regions} selected={selectedRegionCode} onChange={(c) => setSelectedRegionCode(c)} placeholder="Select region" disabled={!!fixedRegion} />
                       {errors.region && <p className="text-red-500 text-xs mt-1">{errors.region}</p>}
                     </div>
                   </div>
@@ -706,10 +856,7 @@ export default function MappingForm({
                       <label className="block font-semibold text-[#0A2D55] mb-2">Nature of Project</label>
                       <input value={natureOfProject} onChange={(e) => setNatureOfProject(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="Enter project nature" />
                     </div>
-                    <div>
-                      <label className="block font-semibold text-[#0A2D55] mb-2">Project Cost</label>
-                      <input value={projectCost} onChange={(e) => setProjectCost(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="e.g. ₱1,000,000" />
-                    </div>
+                    
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -761,7 +908,7 @@ export default function MappingForm({
                     <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
                   </div>
                 </>
-              ) : (
+                ) : (
                 <>
                   {/* Regular User Form */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -812,7 +959,7 @@ export default function MappingForm({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block font-semibold text-[#0A2D55] mb-2">Region <span className="text-red-500">*</span></label>
-                      <SearchableSelect options={regions} selected={selectedRegionCode} onChange={(c) => setSelectedRegionCode(c)} placeholder="Select region" />
+                      <SearchableSelect options={regions} selected={selectedRegionCode} onChange={(c) => setSelectedRegionCode(c)} placeholder="Select region" disabled={!!fixedRegion} />
                       {errors.region && <p className="text-red-500 text-xs mt-1">{errors.region}</p>}
                     </div>
                     <div>
@@ -879,7 +1026,8 @@ export default function MappingForm({
                     <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
                   </div>
                 </>
-              )}
+              )
+            )}
               </div>
             </div>
 

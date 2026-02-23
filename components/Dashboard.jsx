@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import * as XLSX from 'xlsx-js-style';
 import {
   Plus,
@@ -56,6 +57,8 @@ export function Dashboard({
   const [remarksFilter, setRemarksFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [fabOpen, setFabOpen] = useState(false);
+  const [fabMounted, setFabMounted] = useState(false);
+  const [fabRightPx, setFabRightPx] = useState(32);
   const [ongoingSubTab, setOngoingSubTab] = useState('summary');
   
   const [showViewModal, setShowViewModal] = useState(false);
@@ -153,12 +156,7 @@ export function Dashboard({
     return null;
   };
 
-  const formatProjectCostForDisplay = (m) => {
-    const raw = extractProjectCostValue(m);
-    const parsed = parseProjectCost(raw);
-    if (parsed === 0 && (raw === 0 || raw === '' || raw === null || raw === undefined)) return '-';
-    return `₱${parsed.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  };
+  
 
   // Return a canonical region label for UI grouping/display.
   // Uses detectRegionSheet() then falls back to a trimmed version of the input.
@@ -223,7 +221,6 @@ export function Dashboard({
     'Name of Project',
     'Location',
     'Nature of Project',
-    'Project Cost',
     'CADT Status',
     'Affected ICC',
     'Year Approved',
@@ -259,7 +256,7 @@ export function Dashboard({
     if (h.includes('applicant') || h.includes('proponent')) return getField(['proponent', 'applicantProponent', 'applicant_proponent', 'applicant', 'applicant_name', 'applicantName']) || '-';
     if (h.includes('name of project') || (h.includes('name') && !h.includes('region'))) return getField(['nameOfProject', 'name_of_project', 'projectName', 'project_name', 'name', 'title']) || '-';
     if (h.includes('nature')) return getField(['natureOfProject', 'nature_of_project', 'nature', 'projectNature']) || '-';
-    if (h.includes('project cost') || h.includes('cost')) return getField(['projectCost', 'project_cost', 'cost', 'project_cost_php']) || '-';
+    
     if (h.includes('cadt')) return getField(['cadtStatus', 'cadt_status', 'cadt']) || '-';
     if (h === 'icc' || h.includes('icc')) return getField(['icc', 'iccs', 'affectedICC', 'affected_icc', 'affected_iccs']) || '-';
     if (h === 'location') return getField(['location', 'province', 'provinceName', 'province_name', 'location_full']) || '-';
@@ -549,9 +546,17 @@ export function Dashboard({
     return false;
   };
 
-  const ongoingRecords = (selectedCollection && String(selectedCollection).toLowerCase().includes('ongoing'))
-    ? (mappings || [])
-    : (mappings || []).filter((m) => isOngoingMapping(m));
+  // Always derive ongoing records by filtering the available `mappings` for
+  // items that are explicitly marked as ongoing or come from an ongoing
+  // import collection. This is more robust than assuming `selectedCollection`
+  // guarantees the mapping contents.
+  // If the currently selected collection is an ongoing import collection,
+  // treat all loaded mappings as ongoing (the background tagging may not have
+  // completed yet). Otherwise, filter by explicit ongoing flags/import markers.
+  const isSelectedCollectionOngoing = selectedCollection && String(selectedCollection).toLowerCase().includes('ongoing');
+  const ongoingRecords = Array.isArray(mappings)
+    ? (isSelectedCollectionOngoing ? mappings : mappings.filter((m) => isOngoingMapping(m)))
+    : [];
 
   const ongoingSummaryRows = computeSummaryRows(ongoingRecords || []);
 
@@ -614,13 +619,39 @@ export function Dashboard({
       return String(val);
     };
 
+    // Fast-path: if the App attached a canonical `_display` object, prefer those values
+    try {
+      if (m && m._display && typeof m._display === 'object') {
+        if (key === 'location' && m._display.location) return formatVal(m._display.location);
+        if ((key === 'iccs' || key === 'icc') && m._display.iccs) return formatVal(m._display.iccs);
+        if ((key === 'proponent' || key === 'applicant') && m._display.proponent) return formatVal(m._display.proponent);
+        if (key === 'surveyNumber' && m._display.surveyNumber) return formatVal(m._display.surveyNumber);
+      }
+    } catch (e) {
+      // ignore display fallback errors
+    }
+
     const tryGet = (obj, k) => {
       if (!obj || !k) return null;
       if (Object.prototype.hasOwnProperty.call(obj, k)) return formatVal(obj[k]);
       return null;
     };
 
-    // Build normalized lookup from mapping keys -> values
+    // Debugging helper: when resolving proponent/applicant, collect candidate checks
+    const probeKeys = new Set(['proponent', 'applicant']);
+
+    const tryGetFromOngoing = (mobj, k) => {
+      try {
+        if (!mobj || !mobj.ongoing) return null;
+        const od = mobj.ongoing;
+        if (Object.prototype.hasOwnProperty.call(od, k)) return formatVal(od[k]);
+        return null;
+      } catch (e) {
+        return null;
+      }
+    };
+
+    // Build normalized lookup from mapping keys -> values, including nested `ongoing` keys
     const normalizedMap = {};
     Object.keys(m || {}).forEach((orig) => {
       try {
@@ -629,43 +660,212 @@ export function Dashboard({
         // ignore
       }
     });
+    try {
+      if (m && m.ongoing && typeof m.ongoing === 'object') {
+        Object.keys(m.ongoing).forEach((orig) => {
+          try {
+            const nk = normalizeHeader(orig);
+            if (!normalizedMap[nk]) normalizedMap[nk] = m.ongoing[orig];
+          } catch (e) {
+            // ignore
+          }
+        });
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    // Quick heuristic: if resolving `proponent` prefer explicit name variants
+    // from nested `ongoing`, top-level name fields, or raw_fields before
+    // falling back to shorter tokens that may be import artifacts.
+    try {
+      if ((key === 'proponent' || key === 'applicant')) {
+        const preferCandidates = [];
+        if (m && m.ongoing && typeof m.ongoing === 'object') {
+          preferCandidates.push(m.ongoing.nameOfProponent || m.ongoing.name_of_proponent || m.ongoing.name_of_proponent || m.ongoing.nameOfProponent);
+        }
+        preferCandidates.push(m && (m.nameOfProponent || m.name_of_proponent || m.applicantProponent || m.applicant_proponent || m.applicantName || m.applicant_name));
+        // raw_fields may contain original CSV header variants
+        try {
+          if (m && m.raw_fields && typeof m.raw_fields === 'object') {
+            const rf = m.raw_fields;
+            const candidateKeys = ['name_of_proponent','name of proponent','name_of_proponent','proponent','applicantproponent','applicant_proponent'];
+            for (const ck of candidateKeys) {
+              if (!ck) continue;
+              const safe = String(ck).trim().replace(/\s+/g, '_').replace(/[^A-Za-z0-9_]/g, '_').toLowerCase();
+              if (Object.prototype.hasOwnProperty.call(rf, safe) && rf[safe]) preferCandidates.push(rf[safe]);
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+
+        for (const pc of preferCandidates) {
+          try {
+            const s = formatVal(pc);
+            if (s && typeof s === 'string' && s.length > 2 && !/^[A-Za-z0-9_-]{20}$/.test(s)) return s;
+          } catch (e) {
+            // ignore
+          }
+        }
+      }
+    } catch (e) {
+      // ignore heuristic errors
+    }
 
     const seek = (desiredKeys) => {
+      const probe = probeKeys.has(key);
+      const tested = [];
+      const isShort = (v) => (typeof v === 'string' && String(v || '').trim().length <= 2);
+      const logReturn = (stage, val) => {
+        if (probe) console.log('getOngoingField probe', { id: m && m.id, key, stage, val, tested, normalizedKeys: Object.keys(normalizedMap || {}), raw_fields: m && m.raw_fields });
+        return val;
+      };
       for (const dk of desiredKeys) {
         if (!dk) continue;
         // direct
         const v1 = tryGet(m, dk);
-        if (v1) return v1;
+        if (v1) {
+          // skip values that are exactly the document id or look like a doc id
+          tested.push({ stage: 'direct', dk, value: v1 });
+          if (typeof v1 === 'string' && m && m.id && String(v1) === String(m.id)) {
+            // ignore accidental id values
+          } else if (typeof v1 === 'string' && /^[A-Za-z0-9_-]{20}$/.test(v1)) {
+            // likely a Firestore doc id or random token; ignore
+          } else if (isShort(v1)) {
+            // ignore very short tokens (import artifacts)
+          } else {
+            return logReturn('direct', v1);
+          }
+        }
+        // nested ongoing object
+        const v1ongo = tryGetFromOngoing(m, dk);
+        if (v1ongo) {
+          tested.push({ stage: 'ongoing', dk, value: v1ongo });
+          if (typeof v1ongo === 'string' && m && m.id && String(v1ongo) === String(m.id)) {
+            // ignore
+          } else if (typeof v1ongo === 'string' && /^[A-Za-z0-9_-]{20}$/.test(v1ongo)) {
+            // ignore
+          } else if (isShort(v1ongo)) {
+            // ignore very short tokens
+          } else {
+            return logReturn('ongoing', v1ongo);
+          }
+        }
         // sanitized variant (underscored)
         const s = sanitizeFieldName(dk);
         const v2 = tryGet(m, s);
-        if (v2) return v2;
+        if (v2) {
+          tested.push({ stage: 'sanitized', dk: s, value: v2 });
+          if (typeof v2 === 'string' && m && m.id && String(v2) === String(m.id)) {
+            // ignore
+          } else if (typeof v2 === 'string' && /^[A-Za-z0-9_-]{20}$/.test(v2)) {
+            // ignore
+          } else if (isShort(v2)) {
+            // ignore
+          } else {
+            return logReturn('sanitized', v2);
+          }
+        }
+        const v2ongo = tryGetFromOngoing(m, s);
+        if (v2ongo) {
+          tested.push({ stage: 'sanitized_ongoing', dk: s, value: v2ongo });
+          if (typeof v2ongo === 'string' && m && m.id && String(v2ongo) === String(m.id)) {
+            // ignore
+          } else if (typeof v2ongo === 'string' && /^[A-Za-z0-9_-]{20}$/.test(v2ongo)) {
+            // ignore
+          } else if (isShort(v2ongo)) {
+            // ignore
+          } else {
+            return logReturn('sanitized_ongoing', v2ongo);
+          }
+        }
         // normalized header match
         const nk = normalizeHeader(dk);
-        if (normalizedMap[nk]) return formatVal(normalizedMap[nk]);
+        if (normalizedMap[nk]) {
+          const candidate = formatVal(normalizedMap[nk]);
+          tested.push({ stage: 'normalized', dk: nk, value: candidate });
+          if (candidate) {
+            if (typeof candidate === 'string' && m && m.id && String(candidate) === String(m.id)) {
+              // ignore doc id values
+            } else if (typeof candidate === 'string' && /^[A-Za-z0-9_-]{20}$/.test(candidate)) {
+              // likely a UID or doc id, ignore
+            } else if (isShort(candidate)) {
+              // ignore short tokens
+            } else {
+              return logReturn('normalized', candidate);
+            }
+          }
+        }
         // Check preserved raw_fields if present (exact CSV column values)
         try {
           if (m && m.raw_fields && typeof m.raw_fields === 'object') {
+            // also try a snake_case variant of the desired key (e.g. typeOfProject -> type_of_project)
+            const snake = String(dk || '').replace(/([a-z0-9])([A-Z])/g, '$1_$2').replace(/\s+/g, '_').toLowerCase();
             const candidateKeys = [
               dk,
               s,
               nk,
               dk.replace(/\s+/g, '_').toLowerCase(),
+              snake,
             ];
             for (const ck of candidateKeys) {
               if (!ck) continue;
               const safe = String(ck).trim().replace(/\s+/g, '_').replace(/[^A-Za-z0-9_]/g, '_').toLowerCase();
-              if (Object.prototype.hasOwnProperty.call(m.raw_fields, safe) && m.raw_fields[safe]) return String(m.raw_fields[safe]);
+              if (Object.prototype.hasOwnProperty.call(m.raw_fields, safe) && m.raw_fields[safe]) {
+                const cand = String(m.raw_fields[safe] || '').trim();
+                if (cand.length <= 2) continue;
+                return cand;
+              }
             }
           }
         } catch (e) {
           // ignore raw_fields lookup errors
+        }
+        // Additional heuristic: some imports use unexpected headers like
+        // 'project location', 'project_location', 'affected_iccs', etc.
+        try {
+          if (m && m.raw_fields && typeof m.raw_fields === 'object') {
+            const rfKeys = Object.keys(m.raw_fields || {}).map((k) => String(k || '').toLowerCase());
+            // project location variants
+            if (rfKeys.some((k) => k.includes('project') && k.includes('location'))) {
+              const k = rfKeys.find((k) => k.includes('project') && k.includes('location'));
+              if (k && m.raw_fields[k]) return String(m.raw_fields[k]);
+            }
+            // icc variants
+            if (rfKeys.some((k) => k.includes('icc') || k.includes('affected_icc') || k.includes('affected_iccs') || k.includes('affected_iccs/ips') || k.includes('affected_iccs_ips'))) {
+              const matches = rfKeys.filter((k) => k.includes('icc') || k.includes('affected_icc') || k.includes('affected_iccs') || k.includes('affected_iccs/ips') || k.includes('affected_iccs_ips'));
+              const vals = [];
+              matches.forEach((mk) => {
+                const v = m.raw_fields[mk];
+                if (v) vals.push(String(v));
+              });
+              if (vals.length) return vals.join(', ');
+            }
+            // region fallback: look for a raw field explicitly labelled 'region' or 'sheet'
+            if (rfKeys.some((k) => k === 'region' || k === 'sheet' || k.includes('region'))) {
+              const k = rfKeys.find((k) => k === 'region' || k === 'sheet' || k.includes('region'));
+              if (k && m.raw_fields[k]) return String(m.raw_fields[k]);
+            }
+          }
+        } catch (e) {
+          // ignore
         }
         // try compacted key (letters+digits only)
         const ck = compactHeader(dk);
         for (const orig of Object.keys(m || {})) {
           if (compactHeader(orig) === ck) return formatVal(m[orig]);
         }
+          // also check nested ongoing compacted keys
+          try {
+            if (m && m.ongoing && typeof m.ongoing === 'object') {
+              for (const orig of Object.keys(m.ongoing || {})) {
+                if (compactHeader(orig) === ck) return formatVal(m.ongoing[orig]);
+              }
+            }
+          } catch (e) {
+            // ignore
+          }
       }
       return null;
     };
@@ -674,11 +874,25 @@ export function Dashboard({
     switch (key) {
       case 'proponent': return seek(['proponent', 'applicant', 'applicantProponent', 'applicant_proponent']) || '-';
       case 'nameOfProject': return seek(['nameOfProject', 'projectName', 'name', 'title']) || '-';
-      case 'typeOfProject': return seek(['natureOfProject', 'nature', 'projectType', 'typeOfProject']) || '-';
-      case 'location': return seek(['location', 'province', 'location_full', 'provinceName']) || '-';
-      case 'area': return seek(['totalArea', 'area', 'area_ha', 'projectArea']) || '-';
-      case 'ancestral': return seek(['affectedAncestralDomain', 'ancestralDomain', 'ancestral_domains']) || '-';
-      case 'iccs': return seek(['icc', 'iccs', 'affectedICC', 'affected_icc']) || '-';
+      case 'typeOfProject': return seek(['typeOfProject', 'type_of_project', 'Type of project', 'Type_of_project', 'type of project', 'natureOfProject', 'nature', 'projectType']) || '-';
+      case 'location': return seek(['location', 'projectLocation', 'project_location', 'project location', 'location_full', 'province', 'provinceName']) || '-';
+      case 'area': {
+        // Prefer ongoing-specific project area fields if present
+        try {
+          if (m && m.ongoing && typeof m.ongoing === 'object') {
+            const od = m.ongoing;
+            const areaCandidates = ['project_area_in_hectares', 'projectAreaInHectares', 'project_area', 'projectArea', 'project area', 'project_area_ha', 'area_in_hectares'];
+            for (const c of areaCandidates) {
+              if (Object.prototype.hasOwnProperty.call(od, c) && od[c] !== null && typeof od[c] !== 'undefined' && String(od[c]).trim() !== '') return formatVal(od[c]);
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+        return seek(['totalArea', 'area', 'area_ha', 'projectArea']) || '-';
+      }
+      case 'ancestral': return seek(['affectedAncestralDomain', 'affected_ancestral_domain_s', 'affected_ancestral_domains', 'Affected Ancestral Domain/s', 'ancestralDomain', 'ancestral_domains']) || '-';
+      case 'iccs': return seek(['iccs','icc','affectedICC','affected_icc','Affected ICCs/IPs','affected_iccs','affected_iccs_ips','affected_iccs/ips','affectedIccsIps','affectedIccs','affected_icc_ips']) || '-';
       case 'dateOfApplication': return seek(['dateOfApplication', 'date_of_application', 'date']) || '-';
       default: {
         // try direct, then normalized/compacted matches
@@ -701,7 +915,32 @@ export function Dashboard({
         for (const orig of Object.keys(m || {})) {
           if (metaKeys.has(orig)) continue;
           const fv = formatVal(m[orig]);
-          if (fv) return fv;
+          if (!fv) continue;
+          if (typeof fv === 'string' && m && m.id && String(fv) === String(m.id)) continue;
+          if (typeof fv === 'string' && /^[A-Za-z0-9_-]{20}$/.test(fv)) continue;
+          return fv;
+        }
+
+        // Additional explicit fallbacks for common top-level variants not caught above
+        try {
+          if (key === 'location') {
+            const candidates = ['projectLocation','project_location','project location','location_full','locationFull'];
+            for (const c of candidates) {
+              if (Object.prototype.hasOwnProperty.call(m, c) && m[c]) return formatVal(m[c]);
+              if (m.ongoing && Object.prototype.hasOwnProperty.call(m.ongoing, c) && m.ongoing[c]) return formatVal(m.ongoing[c]);
+            }
+          }
+          if (key === 'iccs') {
+            const candidates = ['affectedIccsIps','affected_iccs_ips','affected_iccs','affectedIccs','affected_icc_ips','affected_icc'];
+            const vals = [];
+            for (const c of candidates) {
+              if (Object.prototype.hasOwnProperty.call(m, c) && m[c]) vals.push(formatVal(m[c]));
+              if (m.ongoing && Object.prototype.hasOwnProperty.call(m.ongoing, c) && m.ongoing[c]) vals.push(formatVal(m.ongoing[c]));
+            }
+            if (vals.length) return vals.join(', ');
+          }
+        } catch (e) {
+          // ignore
         }
 
         return '-';
@@ -714,10 +953,79 @@ export function Dashboard({
   );
 
   useEffect(() => {
+    // Mount a portal target for the FAB so it stays fixed to the viewport
+    setFabMounted(true);
+
     if (!alert) return;
     const timeoutId = setTimeout(() => setAlert(null), 10_000);
     return () => clearTimeout(timeoutId);
   }, [alertTick, alert]);
+
+  // Refs to table containers so we can align the FAB
+  const ongoingContainerRef = useRef(null);
+  const approvedContainerRef = useRef(null);
+
+  // Compute a right offset so the FAB visually aligns with the ongoing table's right edge
+  useEffect(() => {
+    const updateFabOffset = () => {
+      try {
+        const containerRef = activeTab === 'ongoing' ? ongoingContainerRef : approvedContainerRef;
+        if (activeTab === 'ongoing' || activeTab === 'mappings') {
+          if (containerRef && containerRef.current) {
+            const rect = containerRef.current.getBoundingClientRect();
+            const desiredRight = Math.max(8, Math.round(window.innerWidth - rect.right) + 16);
+            setFabRightPx(desiredRight);
+            return;
+          }
+        }
+        setFabRightPx(32);
+      } catch (e) {
+        setFabRightPx(32);
+      }
+    };
+
+    // Attach listeners to window and any scrollable descendants inside the ongoing container
+    const scrollableEls = [];
+    const addScrollListeners = () => {
+      // window
+      window.addEventListener('resize', updateFabOffset);
+      window.addEventListener('scroll', updateFabOffset, true);
+
+      // find scrollable descendants (overflow auto/scroll)
+      try {
+        const activeContainer = (activeTab === 'ongoing' ? ongoingContainerRef : approvedContainerRef);
+        if (activeContainer && activeContainer.current) {
+          const descendants = Array.from(activeContainer.current.querySelectorAll('*'));
+          descendants.forEach((el) => {
+            try {
+              const style = window.getComputedStyle(el);
+              const overflowX = style.getPropertyValue('overflow-x');
+              const overflowY = style.getPropertyValue('overflow-y');
+              if (overflowX === 'auto' || overflowX === 'scroll' || overflowY === 'auto' || overflowY === 'scroll') {
+                el.addEventListener('scroll', updateFabOffset, { passive: true });
+                scrollableEls.push(el);
+              }
+            } catch (e) {
+              // ignore
+            }
+          });
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    updateFabOffset();
+    addScrollListeners();
+
+    return () => {
+      window.removeEventListener('resize', updateFabOffset);
+      window.removeEventListener('scroll', updateFabOffset, true);
+      scrollableEls.forEach((el) => {
+        try { el.removeEventListener('scroll', updateFabOffset); } catch (e) { /* ignore */ }
+      });
+    };
+  }, [activeTab, ongoingSubTab, mappings]);
 
   useEffect(() => {
     if (!externalAlert) return;
@@ -989,6 +1297,39 @@ export function Dashboard({
     }
 
     return { type: 'unknown', items: [] };
+  };
+
+  // Return true if the mapping's region should show action buttons
+  const isActionableRegion = (regionValue) => {
+    if (!regionValue) return false;
+    const detected = detectRegionSheet(regionValue) || String(regionValue || '').trim();
+    // Allow CAR explicitly
+    if (String(detected).toUpperCase().includes('CAR')) return true;
+
+    // Try to extract numeral and optional suffix (A/B)
+    const m = String(detected).match(/([IVXLCM]+)(?:\s*[-–]?\s*([AB]))?/i);
+    const romanToNumber = (r) => {
+      const map = { I:1, II:2, III:3, IV:4, V:5, VI:6, VII:7, VIII:8, IX:9, X:10, XI:11, XII:12, XIII:13 };
+      return map[String(r || '').toUpperCase()] || null;
+    };
+    if (m) {
+      const roman = m[1];
+      const suffix = m[2] ? m[2].toUpperCase() : null;
+      const num = romanToNumber(roman);
+      if (num) {
+        const key = suffix ? `${num}${suffix}` : String(num);
+        const allowed = new Set(['1','2','3','4A','4B','5','6','7','8','9','10','11','12','13']);
+        return allowed.has(key);
+      }
+    }
+
+    // Fallback: check numeric digits in the region string
+    const digits = String(regionValue).match(/(\d{1,2})/);
+    if (digits) {
+      const n = Number(digits[1]);
+      if (n >=1 && n <= 13) return true;
+    }
+    return false;
   };
 
   const parseAreaValue = (value) => {
@@ -1373,7 +1714,6 @@ export function Dashboard({
           m.nameOfProject || m.projectName || '',
           m.location || m.province || '',
           m.natureOfProject || m.nature || '',
-          m.projectCost || '',
           m.cadtStatus || m.cadt || '',
           (m.icc && m.icc.length) ? m.icc.join('; ') : '',
           m.yearApproved || m.year || '',
@@ -1501,6 +1841,11 @@ export function Dashboard({
   };
 
   const handleViewMapping = (mapping) => {
+    try {
+      console.log('Dashboard: handleViewMapping ->', mapping);
+    } catch (e) {
+      // ignore
+    }
     setSelectedMapping(mapping);
     setShowViewModal(true);
     onViewMapping(mapping);
@@ -1547,49 +1892,9 @@ export function Dashboard({
     }
   };
 
-  // Calculate statistics
-  const parseProjectCost = (v) => {
-    if (v === null || v === undefined || v === '') return 0;
-    const cleaned = String(v).replace(/[^0-9.-]+/g, '');
-    const n = Number(cleaned);
-    return Number.isFinite(n) ? n : 0;
-  };
-
-  // Try to extract a sensible project cost value from a mapping document by
-  // checking common aliases and any field name that contains 'cost'.
-  const extractProjectCostValue = (m) => {
-    if (!m || typeof m !== 'object') return 0;
-
-    const candidates = [];
-    // common aliases
-    candidates.push(m.projectCost, m.project_cost, m.cost, m.project_cost_php, m.totalProjectCost, m.total_project_cost);
-
-    // scan any other keys that include 'cost'
-    Object.keys(m).forEach((k) => {
-      if (k && k.toLowerCase().includes('cost')) {
-        candidates.push(m[k]);
-      }
-    });
-
-    for (const v of candidates) {
-      if (v === null || v === undefined || v === '') continue;
-      if (Array.isArray(v)) {
-        if (v.length === 0) continue;
-        return v[0];
-      }
-      return v;
-    }
-
-    return 0;
-  };
-
   // For the Overview stats, prefer `mainMappings` (the main 'mappings' collection)
   // when supplied by the App. Otherwise fall back to the currently loaded `mappings`.
   const overviewSource = (Array.isArray(mainMappings) && mainMappings.length > 0) ? mainMappings : mappings;
-
-  const totalProjectCostNumber = (activeTab === 'overview' ? overviewSource : mappings).reduce((sum, m) => {
-    return sum + parseProjectCost(extractProjectCostValue(m));
-  }, 0);
 
   // Treat any mapping explicitly flagged as ongoing as Ongoing; everything else is Approved.
   // This is a sensible default when imported rows don't include explicit approval/status columns.
@@ -1623,8 +1928,6 @@ export function Dashboard({
 
   const stats = {
     totalMappings: (activeTab === 'overview' ? overviewSource : mappings).length,
-    totalProjectCost: totalProjectCostNumber,
-    totalProjectCostFormatted: (totalProjectCostNumber === 0) ? '0.00' : `₱${totalProjectCostNumber.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
     regions: new Set((activeTab === 'overview' ? overviewSource : mappings).map((m) => m.region)).size,
     approved: approvedCount,
     ongoing: ongoingCount,
@@ -2074,7 +2377,7 @@ export function Dashboard({
               }`}
             >
               <MapIcon size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-              <span>Approved</span>
+              <span>Approved Large Scale</span>
             </button>
             <button
               onClick={() => {
@@ -2088,7 +2391,7 @@ export function Dashboard({
               }`}
             >
               <Bell size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-              <span>Ongoing</span>
+              <span>Ongoing Large Scale</span>
             </button>
           </div>
         </nav>
@@ -2112,17 +2415,7 @@ export function Dashboard({
                 </div>
               </div>
 
-              <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-4 sm:p-6 border-l-4 border-[#F2C94C] hover:shadow-xl transition animate-section-1">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[#0A2D55]/70 text-xs sm:text-sm font-medium mb-1">Total Project Cost</p>
-                    <p className="text-base sm:text-lg lg:text-xl xl:text-2xl font-bold text-[#0C3B6E] leading-tight">{stats.totalProjectCostFormatted}</p>
-                  </div>
-                  <div className="w-11 h-11 sm:w-12 sm:h-12 bg-[#F2C94C]/20 rounded-xl flex items-center justify-center flex-shrink-0">
-                    <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6 text-[#0C3B6E]" />
-                  </div>
-                </div>
-              </div>
+              
 
               <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-4 sm:p-6 border-l-4 border-[#0C3B6E] hover:shadow-xl transition animate-section-2">
                 <div className="flex items-start justify-between gap-3">
@@ -2139,7 +2432,7 @@ export function Dashboard({
               <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-4 sm:p-6 border-l-4 border-green-600 hover:shadow-xl transition animate-section-1">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <p className="text-[#0A2D55]/70 text-xs sm:text-sm font-medium truncate">Approved</p>
+                    <p className="text-[#0A2D55]/70 text-xs sm:text-sm font-medium truncate">Approved </p>
                     <p className="text-2xl sm:text-4xl font-bold text-green-700 mt-1 sm:mt-2">{stats.approved}</p>
                   </div>
                   <div className="w-11 h-11 sm:w-12 sm:h-12 bg-green-100 rounded-xl flex items-center justify-center flex-shrink-0">
@@ -2238,7 +2531,7 @@ export function Dashboard({
             ) : (
               <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg border border-white/20 overflow-hidden animate-section-2">
                 {/* Desktop Table */}
-                <div className="hidden sm:block overflow-x-auto">
+                <div ref={approvedContainerRef} className="hidden sm:block overflow-x-auto">
                   <table className={isInventoryUser ? "w-full table-auto min-w-[1600px]" : "w-full table-fixed"}>
                     <thead className="bg-[#0A2D55]/5 border-b border-[#0A2D55]/15">
                       <tr>
@@ -2269,8 +2562,8 @@ export function Dashboard({
                               key={i}
                               className={
                                 isInventoryUser
-                                  ? "px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 whitespace-normal break-words min-w-[140px]"
-                                  : "px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 max-w-xs truncate"
+                                  ? "px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 whitespace-normal break-words min-w-[140px] text-center"
+                                  : "px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 max-w-xs truncate text-center"
                               }
                               title={String(renderCellForHeader(mapping, h) || '')}
                             >
@@ -2279,33 +2572,39 @@ export function Dashboard({
                           ))}
                           <td className="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm w-[120px] sticky right-0 bg-white shadow-[-6px_0_10px_rgba(7,26,44,0.06)]">
                             <div className="flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => handleViewMapping(mapping)}
-                                className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#0A2D55]/15 text-[#0A2D55] hover:bg-[#0A2D55]/5 transition"
-                                title="View"
-                                aria-label="View"
-                              >
-                                <Eye size={15} />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => onEditMapping(mapping)}
-                                className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#F2C94C]/40 text-[#8B6F1C] hover:bg-[#F2C94C]/15 transition"
-                                title="Edit"
-                                aria-label="Edit"
-                              >
-                                <Pencil size={15} />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleOpenDeleteModal(mapping)}
-                                className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-red-200 text-red-600 hover:bg-red-50 transition"
-                                title="Delete"
-                                aria-label="Delete"
-                              >
-                                <Trash2 size={15} />
-                              </button>
+                              {isActionableRegion(mapping.region) ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleViewMapping(mapping)}
+                                    className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#0A2D55]/15 text-[#0A2D55] hover:bg-[#0A2D55]/5 transition"
+                                    title="View"
+                                    aria-label="View"
+                                  >
+                                    <Eye size={15} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => onEditMapping(mapping)}
+                                    className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#F2C94C]/40 text-[#8B6F1C] hover:bg-[#F2C94C]/15 transition"
+                                    title="Edit"
+                                    aria-label="Edit"
+                                  >
+                                    <Pencil size={15} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenDeleteModal(mapping)}
+                                    className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-red-200 text-red-600 hover:bg-red-50 transition"
+                                    title="Delete"
+                                    aria-label="Delete"
+                                  >
+                                    <Trash2 size={15} />
+                                  </button>
+                                </>
+                              ) : (
+                                <span className="text-xs text-[#0A2D55]/40">—</span>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -2493,7 +2792,7 @@ export function Dashboard({
               </div>
             </div>
             {isInventoryUser ? (
-              <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-6 overflow-x-auto">
+              <div ref={ongoingContainerRef} className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-6 overflow-x-auto">
                 {/* Ongoing subtabs */}
                 <>
                   {tabsHeader}
@@ -2563,7 +2862,7 @@ export function Dashboard({
                             {currentOngoingTab.headers.map((h, i) => (
                               <th key={i} title={h} className="px-3 sm:px-4 py-2 text-left text-[11px] sm:text-[12px] font-semibold text-[#0A2D55] normal-case leading-snug whitespace-nowrap truncate max-w-[220px]">{compactHeaderDisplay(h)}</th>
                             ))}
-                            <th className="px-2 sm:px-2 py-1 text-left text-[10px] sm:text-[11px] font-semibold text-[#0A2D55] normal-case w-[110px]">ACTIONS</th>
+                            <th className="px-2 sm:px-2 py-1 text-left text-[10px] sm:text-[11px] font-semibold text-[#0A2D55] normal-case w-[110px] sticky right-0 bg-[#F4F7FA] shadow-[-6px_0_10px_rgba(7,26,44,0.06)]">ACTIONS</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -2575,13 +2874,19 @@ export function Dashboard({
                             paginatedOngoing.map((m, idx) => (
                               <tr key={m.id || idx} className="border-b border-[#0A2D55]/10">
                                 {currentOngoingTab.keys.map((k, j) => (
-                                  <td key={j} className="px-2.5 sm:px-3 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{getOngoingField(m, k)}</td>
+                                  <td key={j} className="px-2.5 sm:px-3 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal text-center">{getOngoingField(m, k)}</td>
                                 ))}
-                                <td className="px-2.5 sm:px-3 py-2 text-[12px] text-[#0A2D55]/80 w-[110px]">
-                                  <div className="flex items-center gap-1.5">
-                                    <button type="button" onClick={() => handleViewMapping(m)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#0A2D55]/15 text-[#0A2D55] hover:bg-[#0A2D55]/5 transition" title="View" aria-label="View"><Eye size={15} /></button>
-                                    <button type="button" onClick={() => onEditMapping(m)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#F2C94C]/40 text-[#8B6F1C] hover:bg-[#F2C94C]/15 transition" title="Edit" aria-label="Edit"><Pencil size={15} /></button>
-                                    <button type="button" onClick={() => handleOpenDeleteModal(m)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-red-200 text-red-600 hover:bg-red-50 transition" title="Delete" aria-label="Delete"><Trash2 size={15} /></button>
+                                <td className="px-2.5 sm:px-3 py-2 text-[12px] text-[#0A2D55]/80 w-[110px] sticky right-0 bg-white shadow-[-6px_0_10px_rgba(7,26,44,0.06)]">
+                                  <div className="flex items-center gap-1.5 justify-end">
+                                      {isActionableRegion(m.region) ? (
+                                        <>
+                                          <button type="button" onClick={() => handleViewMapping(m)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#0A2D55]/15 text-[#0A2D55] hover:bg-[#0A2D55]/5 transition" title="View" aria-label="View"><Eye size={15} /></button>
+                                          <button type="button" onClick={() => onEditMapping(m)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#F2C94C]/40 text-[#8B6F1C] hover:bg-[#F2C94C]/15 transition" title="Edit" aria-label="Edit"><Pencil size={15} /></button>
+                                          <button type="button" onClick={() => handleOpenDeleteModal(m)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-red-200 text-red-600 hover:bg-red-50 transition" title="Delete" aria-label="Delete"><Trash2 size={15} /></button>
+                                        </>
+                                      ) : (
+                                        <span className="text-xs text-[#0A2D55]/40">—</span>
+                                      )}
                                   </div>
                                 </td>
                               </tr>
@@ -2609,7 +2914,8 @@ export function Dashboard({
       </main>
 
       {/* Floating Action Button with Menu */}
-      <div className="fixed right-8 z-50 bottom-20 sm:bottom-8" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
+      {(fabMounted && typeof document !== 'undefined' && document.body) ? createPortal(
+        <div className="fixed z-50 bottom-20 sm:bottom-8 right-4" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
         {/* Profile Button - Top */}
         <button
           onClick={() => {
@@ -2630,7 +2936,19 @@ export function Dashboard({
         {/* Add Mapping Button - Directly Left */}
         <button
           onClick={() => {
-            onAddMapping();
+            // If we're on the Ongoing tab and a region subtab is active, pre-fill the region
+            let preRegion = null;
+            if (activeTab === 'ongoing') {
+              const id = String(ongoingSubTab || '').toLowerCase();
+              const m = id.match(/^region(\d{1,2})$/);
+              if (id === 'car') preRegion = 'CAR';
+              else if (m) {
+                const n = Number(m[1]);
+                const romanMap = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII'];
+                preRegion = `Region ${romanMap[n - 1]}`;
+              }
+            }
+            onAddMapping({ ongoing: activeTab === 'ongoing', region: preRegion });
             setFabOpen(false);
           }}
           className={cn(
@@ -2670,7 +2988,8 @@ export function Dashboard({
             className={`transition-transform duration-300 ${fabOpen ? 'rotate-45' : ''}`}
           />
         </button>
-      </div>
+        </div>, document.body
+      ) : null}
 
       {/* Overlay to close FAB menu */}
       {fabOpen && (
@@ -2888,14 +3207,25 @@ export function Dashboard({
                       <p className="text-xs text-white/70 mt-0.5">Saved record from the form</p>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleCloseViewModal}
-                    className="w-9 h-9 rounded-lg bg-white/10 text-white hover:bg-white/20 transition"
-                    aria-label="Close"
-                  >
-                    ✕
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => console.log('Dashboard: selectedMapping ->', selectedMapping)}
+                      className="px-3 py-1 rounded-md bg-white/10 text-white hover:bg-white/20 text-xs"
+                      aria-label="Debug mapping"
+                      title="Log mapping to console"
+                    >
+                      Debug
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCloseViewModal}
+                      className="w-9 h-9 rounded-lg bg-white/10 text-white hover:bg-white/20 transition"
+                      aria-label="Close"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -2906,60 +3236,67 @@ export function Dashboard({
                       {/* NCIP Inventory User View */}
                       <div>
                         <p className="text-xs font-semibold text-white/70">No. (Survey Number)</p>
-                        <p className="text-white font-semibold mt-1">{selectedMapping.surveyNumber || '-'}</p>
+                        <p className="text-white font-semibold mt-1">{getOngoingField(selectedMapping, 'surveyNumber') || '-'}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Region</p>
-                        <p className="text-white mt-1">{selectedMapping.region || '-'}</p>
+                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'region') || selectedMapping.region || '-'}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Control Number</p>
-                        <p className="text-white font-semibold mt-1">{selectedMapping.controlNumber || '-'}</p>
+                        <p className="text-white font-semibold mt-1">{getOngoingField(selectedMapping, 'controlNumber') || '-'}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Proponent</p>
-                        <p className="text-white mt-1">{selectedMapping.applicantProponent || selectedMapping.proponent || '-'}</p>
+                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'proponent') || getOngoingField(selectedMapping, 'applicant') || selectedMapping.proponent || '-'}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Name of Project</p>
-                        <p className="text-white mt-1">{selectedMapping.nameOfProject || '-'}</p>
+                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'nameOfProject') || '-'}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Location</p>
-                        <p className="text-white mt-1">{selectedMapping.location || '-'}</p>
+                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'location') || '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-white/70">Project Area (ha)</p>
+                        <p className="text-white font-mono mt-1">{
+                          (() => {
+                            const rawArea = getOngoingField(selectedMapping, 'area') || getOngoingField(selectedMapping, 'totalArea') || selectedMapping?.project_area_in_hectares || selectedMapping?.projectAreaInHectares || selectedMapping?.totalArea || '';
+                            const num = parseAreaValue(rawArea);
+                            return num ? num.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 }) : '-';
+                          })()
+                        }</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Nature of Project</p>
-                        <p className="text-white mt-1">{selectedMapping.natureOfProject || '-'}</p>
+                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'typeOfProject') || getOngoingField(selectedMapping, 'natureOfProject') || '-'}</p>
                       </div>
-                      <div>
-                        <p className="text-xs font-semibold text-white/70">Project Cost</p>
-                        <p className="text-white mt-1">{selectedMapping ? formatProjectCostForDisplay(selectedMapping) : '-'}</p>
-                      </div>
+                      
                       <div>
                         <p className="text-xs font-semibold text-white/70">CADT Status</p>
-                        <p className="text-white mt-1">{selectedMapping.cadtStatus || '-'}</p>
+                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'cadtStatus') || getOngoingField(selectedMapping, 'cadt') || '-'}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Affected ICC</p>
-                        <p className="text-white mt-1">{selectedMapping.icc?.join(', ') || '-'}</p>
+                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'iccs') || getOngoingField(selectedMapping, 'icc') || (selectedMapping.icc ? (Array.isArray(selectedMapping.icc) ? selectedMapping.icc.join(', ') : selectedMapping.icc) : '-')}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Year Approved</p>
-                        <p className="text-white mt-1">{selectedMapping.yearApproved || '-'}</p>
+                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'yearApproved') || '-'}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">MOA Duration</p>
-                        <p className="text-white mt-1">{selectedMapping.moaDuration || '-'}</p>
+                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'moaDuration') || '-'}</p>
                       </div>
                       <div className="sm:col-span-2">
                         <p className="text-xs font-semibold text-white/70">Community Benefits</p>
-                        <p className="text-white mt-1">{selectedMapping.communityBenefits || '-'}</p>
+                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'communityBenefits') || '-'}</p>
                       </div>
-                      {selectedMapping.remarks && (
+                      {getOngoingField(selectedMapping, 'remarks') && (
                         <div className="sm:col-span-2">
                           <p className="text-xs font-semibold text-white/70">Remarks</p>
-                          <p className="text-white mt-1">{selectedMapping.remarks}</p>
+                          <p className="text-white mt-1">{getOngoingField(selectedMapping, 'remarks')}</p>
                         </div>
                       )}
                     </>
@@ -2968,37 +3305,37 @@ export function Dashboard({
                       {/* Regular User View */}
                       <div>
                         <p className="text-xs font-semibold text-white/70">Survey Number</p>
-                        <p className="text-white font-semibold mt-1">{selectedMapping.surveyNumber || '-'}</p>
+                        <p className="text-white font-semibold mt-1">{getOngoingField(selectedMapping, 'surveyNumber') || '-'}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Total Area (ha)</p>
                         <p className="text-white font-mono mt-1">
-                          {selectedMapping.totalArea?.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 }) || '-'}
+                          {String(parseAreaValue(getOngoingField(selectedMapping, 'totalArea') || selectedMapping.totalArea)).replace('0','0') ? parseAreaValue(getOngoingField(selectedMapping, 'totalArea') || selectedMapping.totalArea).toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 }) : '-'}
                         </p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Region</p>
-                        <p className="text-white mt-1">{selectedMapping.region || '-'}</p>
+                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'region') || selectedMapping.region || '-'}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Province</p>
-                        <p className="text-white mt-1">{selectedMapping.province || '-'}</p>
+                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'province') || selectedMapping.province || '-'}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Municipality/ies</p>
-                        <p className="text-white mt-1">{getMunicipalitiesFull(selectedMapping) || '-'}</p>
+                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'municipality') || getOngoingField(selectedMapping, 'municipalities') || getMunicipalitiesFull(selectedMapping) || '-'}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Barangay/s</p>
-                        <p className="text-white mt-1">{getBarangaysFull(selectedMapping) || '-'}</p>
+                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'barangay') || getOngoingField(selectedMapping, 'barangays') || getBarangaysFull(selectedMapping) || '-'}</p>
                       </div>
                       <div className="sm:col-span-2">
                         <p className="text-xs font-semibold text-white/70">ICCs/IPs</p>
-                        <p className="text-white mt-1">{selectedMapping.icc?.join(', ') || '-'}</p>
+                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'iccs') || getOngoingField(selectedMapping, 'icc') || (selectedMapping.icc ? (Array.isArray(selectedMapping.icc) ? selectedMapping.icc.join(', ') : selectedMapping.icc) : '-')}</p>
                       </div>
                       <div className="sm:col-span-2">
                         <p className="text-xs font-semibold text-white/70">Remarks</p>
-                        <p className="text-white mt-1">{selectedMapping.remarks || '-'}</p>
+                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'remarks') || selectedMapping.remarks || '-'}</p>
                       </div>
                     </>
                   )}

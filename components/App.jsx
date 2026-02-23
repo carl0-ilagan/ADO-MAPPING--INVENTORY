@@ -7,7 +7,7 @@ import { MappingForm } from '@/components/MappingFormClean';
 import { RightSplitModal } from '@/components/RightSplitModal';
 import { ProfilePage } from '@/components/ProfilePage';
 import { onAuthStateChangeListener, signOutUser } from '@/lib/firebaseAuth.js';
-import { getUserMappings, addMapping, deleteMapping, updateMapping, addMappingToCollection, getMappingsFromCollection, registerImportCollection, getUserImportCollections, updateDocumentInCollection } from '@/lib/firebaseDB.js';
+import { getUserMappings, addMapping, deleteMapping, updateMapping, addMappingToCollection, getMappingsFromCollection, registerImportCollection, getUserImportCollections, updateDocumentInCollection, computeLocationFromMapping } from '@/lib/firebaseDB.js';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase.js';
 
@@ -18,6 +18,7 @@ export function App() {
   const [mappings, setMappings] = useState([]);
   const [mainMappings, setMainMappings] = useState([]);
   const [showAddMappingModal, setShowAddMappingModal] = useState(false);
+  const [addMappingContext, setAddMappingContext] = useState(null);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [isLoadingMappings, setIsLoadingMappings] = useState(false);
   const [editingMapping, setEditingMapping] = useState(null);
@@ -25,6 +26,31 @@ export function App() {
   const [toastTick, setToastTick] = useState(0);
   const [availableCollections, setAvailableCollections] = useState([{ id: 'mappings', collectionName: 'mappings' }]);
   const [selectedCollection, setSelectedCollection] = useState('mappings');
+
+  const buildDisplay = (m) => ({
+    location: computeLocationFromMapping(m) || (m.location || ''),
+    iccs: (m.affectedIccsIps || m.affected_iccs_ips || m.affected_iccs || m.affectedIccs || m.affected_icc || m.icc || m.iccs || ''),
+    // Prefer an explicit 'name of proponent' variant for display. Avoid picking short tokens (likely import artifacts or ids).
+    proponent: (() => {
+      try {
+        const candidates = [
+          // nested ongoing variants
+          (m && m.ongoing && (m.ongoing.nameOfProponent || m.ongoing.name_of_proponent || m.ongoing.nameOfProponent)),
+          // common top-level variants
+          m && (m.nameOfProponent || m.name_of_proponent || m.nameOfProponent || m.name_of_proponent),
+          m && (m.applicantProponent || m.applicant_proponent || m.applicantName || m.applicant_name),
+          m && m.proponent,
+        ].filter(Boolean).map((s) => String(s || '').trim()).filter(Boolean);
+
+        for (const c of candidates) {
+          if (c.length > 2 && !/^[A-Za-z0-9_-]{20}$/.test(c)) return c;
+        }
+        return (candidates[0] && String(candidates[0])) || '';
+      } catch (e) {
+        return '';
+      }
+    })(),
+  });
 
   // Monitor auth state changes
   useEffect(() => {
@@ -44,8 +70,9 @@ export function App() {
         setIsLoadingMappings(true);
         try {
           const userMappings = await getUserMappings(user.uid);
-          setMappings(userMappings);
-          setMainMappings(userMappings);
+          const normalized = (userMappings || []).map((m) => ({ ...m, _display: buildDisplay(m) }));
+          setMappings(normalized);
+          setMainMappings(normalized);
           // load user's import collections
           try {
               const imports = await getUserImportCollections(user.uid);
@@ -136,8 +163,9 @@ export function App() {
     }
   }, [mappings, selectedCollection]);
 
-  const handleAddMapping = () => {
+  const handleAddMapping = (opts = {}) => {
     setEditingMapping(null);
+    setAddMappingContext(opts || {});
     setShowAddMappingModal(true);
   };
 
@@ -170,22 +198,76 @@ export function App() {
         proponent: formData.applicantProponent || '', // alias for compatibility
         nameOfProject: formData.nameOfProject || '',
         natureOfProject: formData.natureOfProject || '',
-        projectCost: formData.projectCost || '',
         cadtStatus: formData.cadtStatus || '',
         location: formData.location || '',
         yearApproved: formData.yearApproved || '',
         moaDuration: formData.moaDuration || '',
         communityBenefits: formData.communityBenefits || '',
+        // Merge any ongoing-specific fields (if provided by the form)
+        // Preserve a nested `ongoing` object and also copy common ongoing subkeys
+        // to the root for Dashboard compatibility.
+        ...(formData && formData.ongoing ? { ongoing: { ...formData.ongoing }, ...formData.ongoing } : {}),
+        // If the add mapping context indicated this was created from the Ongoing tab,
+        // mark the mapping with the internal `_ongoing` flag so it appears in ongoing views.
+        _ongoing: Boolean((formData && formData._ongoing) || (addMappingContext && addMappingContext.ongoing)),
       };
 
+      
+
+      // Debug: show the final mapping object that will be saved/updated
+      try {
+        console.debug('App: handleFormSubmit - final mapping object ->', JSON.parse(JSON.stringify(newMapping)));
+      } catch (e) {
+        console.debug('App: handleFormSubmit - final mapping object (raw) ->', newMapping);
+      }
+
       if (editingMapping?.id) {
-        await updateMapping(editingMapping.id, { ...newMapping });
-        setMappings(mappings.map((m) => (m.id === editingMapping.id ? { ...m, ...newMapping } : m)));
+        // Merge edits into the existing mapping without wiping non-empty fields.
+        // For nested objects (e.g. `ongoing`) perform a shallow merge so
+        // unspecified subkeys are preserved instead of being replaced.
+        const mergedMapping = { ...editingMapping };
+        const isPlainObject = (x) => x && typeof x === 'object' && !Array.isArray(x);
+
+        Object.keys(newMapping).forEach((k) => {
+          const v = newMapping[k];
+          const isEmptyArray = Array.isArray(v) && v.length === 0;
+          if (v === '' || v === null || typeof v === 'undefined' || isEmptyArray) {
+            // preserve existing value
+            return;
+          }
+
+          // If both existing and new values are plain objects, merge their keys
+          // but skip empty sub-values so we don't clobber existing subkeys.
+          if (isPlainObject(v) && isPlainObject(mergedMapping[k])) {
+            const existingObj = mergedMapping[k] || {};
+            const mergedObj = { ...existingObj };
+            Object.keys(v).forEach((subk) => {
+              const subv = v[subk];
+              const isSubEmptyArray = Array.isArray(subv) && subv.length === 0;
+              if (subv === '' || subv === null || typeof subv === 'undefined' || isSubEmptyArray) return;
+              mergedObj[subk] = subv;
+            });
+            mergedMapping[k] = mergedObj;
+          } else {
+            mergedMapping[k] = v;
+          }
+        });
+
+        const targetCollection = editingMapping.importCollection && String(editingMapping.importCollection).trim() ? editingMapping.importCollection : 'mappings';
+        if (targetCollection !== 'mappings') {
+          await updateDocumentInCollection(targetCollection, editingMapping.id, { ...mergedMapping });
+        } else {
+          await updateMapping(editingMapping.id, { ...mergedMapping });
+        }
+        setMappings((prev) => prev.map((m) => {
+          if (m.id !== editingMapping.id) return m;
+          const updated = { ...m, ...mergedMapping };
+          return { ...updated, _display: buildDisplay(updated) };
+        }));
       } else {
         const mappingId = await addMapping({ ...newMapping });
-        // Update local state
-        const updatedMappings = [...mappings, { id: mappingId, ...newMapping }];
-        setMappings(updatedMappings);
+        // Update local state using functional update to avoid stale closures
+        setMappings((prev) => [...prev, { id: mappingId, ...newMapping, _display: buildDisplay({ id: mappingId, ...newMapping }) }]);
       }
 
       setToastTick((t) => t + 1);
@@ -203,7 +285,7 @@ export function App() {
   const handleDeleteMapping = async (mappingId) => {
     try {
       await deleteMapping(mappingId);
-      setMappings(mappings.filter(m => m.id !== mappingId));
+      setMappings((prev) => prev.filter((m) => m.id !== mappingId));
     } catch (error) {
       console.error('Error deleting mapping:', error);
     }
@@ -666,20 +748,33 @@ export function App() {
         open={showAddMappingModal}
         onOpenChange={(open) => {
           setShowAddMappingModal(open);
-          if (!open) setEditingMapping(null);
+          if (!open) {
+            setEditingMapping(null);
+            setAddMappingContext(null);
+          }
         }}
         title={editingMapping ? "Edit Mapping" : "Add New Mapping"}
         dismissOnSecondaryClick={true}
         primaryChildren={
-          <MappingForm
-            isModal
-            user={currentUser}
-            onBack={() => setShowAddMappingModal(false)}
-            onSubmit={handleFormSubmit}
-            initialData={editingMapping}
-            formTitle={editingMapping ? "Edit Mapping" : "Add New Mapping"}
-            submitLabel={editingMapping ? "Update Mapping" : "Save Mapping"}
-          />
+            <MappingForm
+              isModal
+              user={currentUser}
+              onBack={() => setShowAddMappingModal(false)}
+              onSubmit={handleFormSubmit}
+              initialData={editingMapping || (addMappingContext && addMappingContext.region ? { region: addMappingContext.region } : null)}
+              // Enable ongoingMode when either opening from the Ongoing tab or when editing an ongoing mapping
+              ongoingMode={Boolean(
+                (addMappingContext && addMappingContext.ongoing) ||
+                (editingMapping && (editingMapping._ongoing === true || String(editingMapping.importCollection || '').toLowerCase().includes('ongoing')))
+              )}
+              // Lock region when opened from a region subtab or when editing a mapping (use mapping.region)
+              fixedRegion={
+                (editingMapping && (editingMapping.region || null)) ||
+                (addMappingContext && addMappingContext.region ? addMappingContext.region : null)
+              }
+              formTitle={editingMapping ? "Edit Mapping" : "Add New Mapping"}
+              submitLabel={editingMapping ? "Update Mapping" : "Save Mapping"}
+            />
         }
       />
       <RightSplitModal
