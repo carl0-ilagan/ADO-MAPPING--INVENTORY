@@ -586,18 +586,41 @@ export function Dashboard({
       });
     }
 
-    // Generic Region N tabs (e.g. region1 -> Region I)
-    const m = id.match(/^region(\d{1,2})$/);
+    // Generic Region N tabs (e.g. region1 -> Region I, region4a -> Region IV-A)
+    const m = id.match(/^region(\d{1,2})([abAB])?$/);
     if (m) {
       const n = Number(m[1]);
+      const suffix = m[2] ? String(m[2]).toUpperCase() : null;
       const romanMap = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII'];
-      const label = `Region ${romanMap[n - 1]}`;
+      const label = (n === 4 && suffix) ? `Region IV-${suffix}` : `Region ${romanMap[n - 1]}`;
       return ongoingRecords.filter((rec) => {
-        const d = detectRegionSheet(rec.region);
-        if (d === label) return true;
-        const v = String(rec.region || '').toUpperCase();
-        if (!v) return false;
-        return v.includes(label.toUpperCase()) || v.includes(String(n));
+        // Prefer an explicit canonical region from top-level `region`,
+        // then fall back to nested `ongoing.region` if present.
+        const candidate = rec && (rec.region || (rec.ongoing && rec.ongoing.region) || '');
+        const recCanon = canonicalRegion(candidate) || '';
+        if (recCanon === label) return true;
+        // If canonicalization didn't yield a clear label, fall back to
+        // detecting via detectRegionSheet on either field.
+        const dTop = detectRegionSheet(rec.region);
+        const dOngoing = rec && rec.ongoing ? detectRegionSheet(rec.ongoing.region) : null;
+        if (dTop === label || dOngoing === label) return true;
+        // As a last resort, attempt to match numeric tokens exactly from raw text
+        const raw = String(candidate || '').toUpperCase();
+        if (!raw) return false;
+        // Match the full label as a whole word to avoid collisions like
+        // 'Region I' matching inside 'Region IV-A'. Escape the label first.
+        try {
+          const labelUpper = label.toUpperCase();
+          const esc = labelUpper.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+          const re = new RegExp(`\\b${esc}\\b`);
+          if (re.test(raw)) return true;
+        } catch (e) {
+          // fallback to strict equality
+          if (raw === label.toUpperCase()) return true;
+        }
+        const numMatch = raw.match(/\b(\d{1,2})(?:\s*[-–]?\s*[ABab])?\b/);
+        if (numMatch) return Number(numMatch[1]) === n;
+        return false;
       });
     }
 

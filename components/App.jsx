@@ -163,6 +163,36 @@ export function App() {
     }
   }, [mappings, selectedCollection]);
 
+  // Local canonicalization helper (keeps behavior consistent with Dashboard)
+  const canonicalRegion = (regionValue) => {
+    const raw = String(regionValue || '').trim();
+    if (!raw) return '';
+    const value = String(regionValue || '').toUpperCase();
+    if (value.includes('CORDILLERA') || value.includes('CAR')) return 'CAR';
+
+    const romanMatch = value.match(/REGION\s*(XIII|XII|XI|X|IX|VIII|VII|VI|V|IV|III|II|I)(?:\s*[-–]\s*(A|B))?/i);
+    if (romanMatch) {
+      const numeral = romanMatch[1].toUpperCase();
+      const suffix = romanMatch[2] ? romanMatch[2].toUpperCase() : null;
+      if (numeral === 'IV' && suffix) return `Region IV-${suffix}`;
+      return `Region ${numeral}`;
+    }
+
+    const numericMatch = value.match(/REGION\s*(\d{1,2})(?:\s*[-–]?\s*([AB]))?/i) || value.match(/\b(\d{1,2})(?:\s*[-–]?\s*([AB]))?\b/);
+    if (numericMatch) {
+      const numberValue = Number(numericMatch[1]);
+      const suffix = numericMatch[2] ? numericMatch[2].toUpperCase() : null;
+      if (numberValue === 4 && suffix) return `Region IV-${suffix}`;
+      if (numberValue >= 1 && numberValue <= 13) {
+        const romanMap = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII'];
+        return `Region ${romanMap[numberValue - 1]}`;
+      }
+    }
+
+    // last-resort: return trimmed original
+    return raw;
+  };
+
   const handleAddMapping = (opts = {}) => {
     setEditingMapping(null);
     setAddMappingContext(opts || {});
@@ -219,6 +249,18 @@ export function App() {
         console.debug('App: handleFormSubmit - final mapping object ->', JSON.parse(JSON.stringify(newMapping)));
       } catch (e) {
         console.debug('App: handleFormSubmit - final mapping object (raw) ->', newMapping);
+      }
+
+      // If this add originated from a region subtab, force the saved mapping
+      // to use the canonical region and mark it as ongoing so it only appears
+      // under that region's ongoing subtab.
+      if (addMappingContext && addMappingContext.region && !editingMapping?.id) {
+        const canon = canonicalRegion(addMappingContext.region);
+        if (canon) {
+          newMapping.region = canon;
+          newMapping._ongoing = true;
+          newMapping.ongoing = { ...(newMapping.ongoing || {}), region: canon };
+        }
       }
 
       if (editingMapping?.id) {

@@ -1,0 +1,10 @@
+{
+  "userId": "smoke_test_user",
+  "surveyNumber": "SMOKE-1",
+  "region": "Region I",
+  "province": "TestProvince",
+  "municipalities": ["TestTown"],
+  "barangays": ["TestBarangay"],
+  "nameOfProject": "Smoke Test Project",
+  "ongoing": { "nameOfProponent": "Smoke Proponent", "region": "Region I" }
+}
