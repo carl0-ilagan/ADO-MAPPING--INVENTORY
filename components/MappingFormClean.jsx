@@ -318,6 +318,17 @@ export default function MappingForm({
     'REMARKS'
   ];
 
+  const ONGOING_DROPDOWN_LABELS = new Set([
+    'Issuance of Work Order of FPIC Team',
+    'Pre-FPIC Conference',
+    'Approval of WFP',
+    'Payment of FPIC Fee',
+    'Posting of Notices',
+    '1st Community Assembly',
+    '2nd Community Assembly',
+    'Consensus Building & Decision Meeting',
+  ]);
+
   const sanitizeKey = (label) => (
     String(label || '')
       .trim()
@@ -798,11 +809,21 @@ export default function MappingForm({
                     {ONGOING_LABELS.map((label) => {
                       const key = sanitizeKey(label);
                       const isRemarks = String(label || '').toLowerCase().includes('remark') || label === 'REMARKS';
+                      const isDropdown = ONGOING_DROPDOWN_LABELS.has(label);
                       return (
                         <div key={key}>
                           <label className="block font-semibold text-[#0A2D55] mb-2">{label}</label>
                           {isRemarks ? (
                             <textarea value={ongoingData[key] || ''} onChange={(e) => setOngoingData((s) => ({ ...s, [key]: e.target.value }))} rows={3} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
+                          ) : isDropdown ? (
+                            <SearchableSelect
+                              options={[{ code: 'Done', name: 'Done' }, { code: 'Pending', name: 'Pending' }]}
+                              selected={ongoingData[key] || ''}
+                              onChange={(v) => setOngoingData((s) => ({ ...s, [key]: v }))}
+                              placeholder="Select status"
+                              allowCustom={false}
+                              disabled={false}
+                            />
                           ) : (
                             <input value={ongoingData[key] || ''} onChange={(e) => setOngoingData((s) => ({ ...s, [key]: e.target.value }))} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
                           )}
@@ -862,7 +883,14 @@ export default function MappingForm({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block font-semibold text-[#0A2D55] mb-2">CADT Status</label>
-                      <input value={cadtStatus} onChange={(e) => setCadtStatus(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="Enter CADT status" />
+                      <SearchableSelect
+                        options={[{ code: 'Done', name: 'Done' }, { code: 'Pending', name: 'Pending' }]}
+                        selected={cadtStatus}
+                        onChange={(v) => setCadtStatus(v)}
+                        placeholder="Select CADT status"
+                        allowCustom={false}
+                        disabled={false}
+                      />
                     </div>
                     <div>
                       <label className="block font-semibold text-[#0A2D55] mb-2">Affected ICC</label>
