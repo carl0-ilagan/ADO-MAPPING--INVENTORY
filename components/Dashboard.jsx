@@ -78,6 +78,7 @@ export function Dashboard({
   const [importProgress, setImportProgress] = useState(0);
   const [showImportChoiceModal, setShowImportChoiceModal] = useState(false);
   const [importPreviewRecords, setImportPreviewRecords] = useState([]);
+  const [importPreparedDocs, setImportPreparedDocs] = useState([]);
   const [importInvalidSheets, setImportInvalidSheets] = useState([]);
   const [importRawSheets, setImportRawSheets] = useState([]);
   const [importCollectionName, setImportCollectionName] = useState('');
@@ -1293,9 +1294,25 @@ export function Dashboard({
   // switch the active tab so the collection's records are displayed in Ongoing.
   useEffect(() => {
     try {
-      if (selectedCollection && String(selectedCollection).toLowerCase().includes('ongoing')) {
-        console.log('Dashboard: selectedCollection indicates ongoing -> switching activeTab to ongoing');
-        setActiveTab('ongoing');
+      if (selectedCollection) {
+        const lower = String(selectedCollection).toLowerCase();
+        // If the collection name contains 'ongoing' switch to ongoing
+        if (lower.includes('ongoing')) {
+          console.log('Dashboard: selectedCollection indicates ongoing -> switching activeTab to ongoing');
+          setActiveTab('ongoing');
+        } else {
+          // Otherwise, check availableCollections metadata to see if this
+          // collection is marked as an ongoing import (type === 'ongoing')
+          try {
+            const meta = (Array.isArray(availableCollections) && availableCollections.find((c) => c.collectionName === selectedCollection)) || null;
+            if (meta && String(meta.type || '').toLowerCase() === 'ongoing') {
+              console.log('Dashboard: selectedCollection metadata indicates ongoing -> switching activeTab to ongoing', selectedCollection);
+              setActiveTab('ongoing');
+            }
+          } catch (e) {
+            // ignore
+          }
+        }
       }
     } catch (e) {
       // ignore
@@ -1364,11 +1381,22 @@ export function Dashboard({
 
   const filteredCollectionsForDropdown = React.useMemo(() => {
     if (!Array.isArray(availableCollections)) return [];
+    const isOngoingMarker = (c) => {
+      try {
+        const type = String(c?.type || '').toLowerCase();
+        const name = String(c?.collectionName || '').toLowerCase();
+        const display = String(c?.displayName || '').toLowerCase();
+        return type === 'ongoing' || name.includes('ongoing') || display.includes('(ongoing)');
+      } catch (e) {
+        return false;
+      }
+    };
+
     if (activeTab === 'ongoing') {
-      return availableCollections.filter((c) => c && c.collectionName && (String(c.type || '').toLowerCase() === 'ongoing' || String(c.collectionName).toLowerCase().includes('ongoing')));
+      return availableCollections.filter((c) => c && c.collectionName && isOngoingMarker(c));
     }
     // For Approved (mappings) and other tabs, exclude any 'ongoing' collections
-    return availableCollections.filter((c) => c && c.collectionName && !(String(c.type || '').toLowerCase() === 'ongoing' || String(c.collectionName).toLowerCase().includes('ongoing')));
+    return availableCollections.filter((c) => c && c.collectionName && !isOngoingMarker(c));
   }, [availableCollections, activeTab]);
   // Debug: log what collections are available for this tab
   useEffect(() => {
@@ -1702,15 +1730,8 @@ export function Dashboard({
         console.log(`📋 Sheet "${sheetName}" - Header row found at index ${headerRowIndex}`);
         console.log(`📋 Sheet "${sheetName}" - Headers:`, headerRowOriginal);
 
-        // Build rawRecords for diagnostics
-        const rawRecords = rows.slice(headerRowIndex + 1).map((row) => {
-          const obj = {};
-          for (let i = 0; i < headerRowOriginal.length; i += 1) {
-            const key = sanitizeFieldName(headerRowOriginal[i] || `col_${i}`);
-            obj[key] = row[i] !== undefined && row[i] !== null ? String(row[i]).trim() : '';
-          }
-          return obj;
-        });
+        // Build rawRecords and records in a single pass for performance
+        const rawRecords = [];
 
         // Use schema-based field mapping (header tokens, not indexes)
         const fieldMap = mapHeadersToFields(headerRowOriginal);
@@ -1785,23 +1806,21 @@ export function Dashboard({
         const batchId = `batch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
         const records = [];
-        const dataRows = rows.slice(headerRowIndex + 1);
+        for (let r = headerRowIndex + 1; r < rows.length; r += 1) {
+          const row = rows[r] || [];
+          const rawObj = {};
+          for (let i = 0; i < headerRowOriginal.length; i += 1) {
+            const key = sanitizeFieldName(headerRowOriginal[i] || `col_${i}`);
+            rawObj[key] = row[i] !== undefined && row[i] !== null ? String(row[i]).trim() : '';
+          }
+          rawRecords.push(rawObj);
 
-        dataRows.forEach((row) => {
           // Build Firestore document using schema; also pass original header names
           // so the document contains a `raw_fields` object with exact CSV values.
           const doc = buildFirestoreDocument(row, fieldMap, sheetName, batchId, headerRowOriginal);
-          
-          // Override region if not present in data
-          if (!doc.region) {
-            doc.region = fallbackRegion;
-          }
-
-          // Validate row is not empty
-          if (isValidRow(doc)) {
-            records.push(doc);
-          }
-        });
+          if (!doc.region) doc.region = fallbackRegion;
+          if (isValidRow(doc)) records.push(doc);
+        }
 
         console.log(`✅ Sheet "${sheetName}" - Imported ${records.length} records`);
 
@@ -1852,8 +1871,10 @@ export function Dashboard({
       setImportProgress(100);
       // parsing finished — show completed progress and hide parsing indicator
       setIsImporting(false);
-      // Instead of importing immediately, ask the user whether to add or create new
-      setImportPreviewRecords(allRecords);
+      // Store prepared Firestore-ready docs so confirmation doesn't re-parse
+      setImportPreparedDocs(allRecords);
+      // Keep preview records for compatibility/legacy UI (count-only)
+      setImportPreviewRecords(allRecords.map((r) => ({ surveyNumber: r.surveyNumber || '', region: r.region || '' })));
       setImportInvalidSheets(invalidSheets);
       setImportRawSheets(rawSheets);
       // suggest a default collection name
@@ -1883,7 +1904,8 @@ export function Dashboard({
 
   const handleConfirmImport = async (mode = 'add', collectionName = '') => {
     // mode: 'add' -> merge into existing; 'replace' -> create new set (replace existing)
-    if (!importPreviewRecords || importPreviewRecords.length === 0) {
+    const prepared = (importPreparedDocs && importPreparedDocs.length) ? importPreparedDocs : importPreviewRecords;
+    if (!prepared || prepared.length === 0) {
       setShowImportChoiceModal(false);
       setIsImporting(false);
       setImportProgress(0);
@@ -1911,7 +1933,7 @@ export function Dashboard({
       } catch (e) {
         // ignore
       }
-      if (mode === 'newCollection') {
+      if (options.mode === 'newCollection') {
         // When creating a new collection, prefer the user-supplied collection name
         // if provided. If no name is supplied and the import was started from
         // the Ongoing tab, default to the forced ongoing collection name.
@@ -1924,7 +1946,7 @@ export function Dashboard({
         // created collection uses the original Excel headers as document fields.
         options.rawImport = importRawSheets;
       }
-      await onImportMappings(importPreviewRecords, options);
+      await onImportMappings(prepared, options);
       // If we imported into a dedicated ongoing collection, switch UI to show it
       try {
         const col = options && options.collectionName;
@@ -1935,9 +1957,9 @@ export function Dashboard({
       } catch (e) {
         // ignore
       }
-      const modeMsg = mode === 'add' ? 'added' : mode === 'replace' ? 'replaced' : (mode === 'newCollection' ? 'imported into new collection' : 'processed');
+      const modeMsg = options.mode === 'add' ? 'added' : options.mode === 'replace' ? 'replaced' : (options.mode === 'newCollection' ? 'imported into new collection' : 'processed');
       setAlertTick((t) => t + 1);
-      setAlert({ type: 'success', message: `Import successful. ${importPreviewRecords.length} records ${modeMsg}.` });
+      setAlert({ type: 'success', message: `Import successful. ${prepared.length} records ${modeMsg}.` });
     } catch (err) {
       setAlertTick((t) => t + 1);
       setAlert({ type: 'error', message: err?.message || 'Failed to import Excel file.' });
@@ -2324,7 +2346,7 @@ export function Dashboard({
               </div>
 
               <div className="px-4 sm:px-6 py-4 sm:py-5 text-white/90 overflow-y-auto">
-                <p className="text-sm mb-2">Found <strong>{importPreviewRecords.length}</strong> record(s) across the uploaded sheets.</p>
+                <p className="text-sm mb-2">Found <strong>{(importPreparedDocs && importPreparedDocs.length) || importPreviewRecords.length}</strong> record(s) across the uploaded sheets.</p>
                 {importInvalidSheets.length > 0 && (
                   <div className="mb-2">
                     <div className="flex items-center justify-between text-xs text-yellow-200">
@@ -2376,16 +2398,16 @@ export function Dashboard({
                   </button>
                 </div>
 
-                {importPreviewRecords.length > 0 && (
+                    {(importPreparedDocs && importPreparedDocs.length) || importPreviewRecords.length > 0 && (
                   <div className="flex gap-3 w-full mt-3">
                     <button
                       type="button"
                       onClick={() => {
                         try {
                           // Switch to Ongoing tab and provide a lightweight preview display
-                          // of the imported records as ongoing items without persisting them.
-                          setActiveTab('ongoing');
-                          if (typeof onPreviewImport === 'function') onPreviewImport(importPreviewRecords);
+                              // of the imported records as ongoing items without persisting them.
+                              setActiveTab('ongoing');
+                              if (typeof onPreviewImport === 'function') onPreviewImport(importPreparedDocs.length ? importPreparedDocs : importPreviewRecords);
                           setShowImportChoiceModal(false);
                         } catch (err) {
                           console.warn('Preview as ongoing failed', err);
@@ -2401,30 +2423,32 @@ export function Dashboard({
                 {mappings.length > 0 ? (
                   <div className="w-full">
                     <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={importCollectionName}
-                        onChange={(e) => setImportCollectionName(e.target.value)}
-                        className="flex-1 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white/90 placeholder-white/50"
-                        placeholder="mappings_import_<uid>_2026-02-09T..."
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const valid = /^[A-Za-z0-9_-]+$/.test(importCollectionName.replace(/^mappings_import_/, '')) || /^[A-Za-z0-9_-]+$/.test(importCollectionName);
-                          if (!importCollectionName || !valid) {
-                            setAlertTick((t) => t + 1);
-                            setAlert({ type: 'error', message: 'Please enter a valid collection name (letters, numbers, hyphens, underscores).' });
-                            return;
-                          }
-                          handleConfirmImport('newCollection', importCollectionName);
-                        }}
-                        className="px-4 py-2 rounded-lg bg-red-500 text-white hover:bg-red-600 transition"
-                      >
-                        Create
-                      </button>
+                      <div className="flex-1 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white/90 placeholder-white/50">
+                        <span className="truncate">
+                          {(() => {
+                            try {
+                              if (!importCollectionName) return 'New import';
+                              const suffix = importCollectionName.replace(/^mappings_import_/, '');
+                              const parts = suffix.split('_');
+                              const ts = parts.slice(1).join('_') || parts[0];
+                              return `Import ${ts.replace(/T/, ' ').replace(/-/g, ':')}`;
+                            } catch (e) {
+                              return 'New import';
+                            }
+                          })()}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleConfirmImport('newCollection', importCollectionName)}
+                          className="px-4 py-2 rounded-lg bg-red-500 text-white hover:bg-red-600 transition"
+                        >
+                          Create
+                        </button>
+                      </div>
                     </div>
-                    <p className="text-xs text-white/70 mt-2">Collection names may contain letters, numbers, hyphens and underscores only.</p>
+                    <p className="text-xs text-white/70 mt-2">Collection names are autogenerated and hidden; the system keeps the full name internally.</p>
                   </div>
                 ) : (
                   <div className="w-full">

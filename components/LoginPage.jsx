@@ -29,10 +29,11 @@ export function LoginPage({ onLogin }) {
       const usernameInput = username.trim();
       
       // Convert username to email if needed (support both formats)
+      // Default to the NCIP inventory domain (ncip@inventory.gov.ph)
       let email = usernameInput;
       if (!usernameInput.includes('@')) {
-        // If user enters "ncip", convert to email
-        email = `${usernameInput}@ado.gov.ph`;
+        // If user enters "ncip", convert to inventory email
+        email = `${usernameInput}@inventory.gov.ph`;
       }
       
       console.log('🔐 Attempting login with email:', email);
@@ -168,7 +169,7 @@ export function LoginPage({ onLogin }) {
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="ncip or ncip@ado.gov.ph"
+                placeholder="ncip or ncip@inventory.gov.ph"
                 className="w-full px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm border border-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/35 focus:border-[#F2C94C]/35 transition bg-white/10 text-white placeholder:text-white/60 backdrop-blur-md shadow-inner shadow-black/10"
                 autoComplete="username"
                 disabled={isLoading}

@@ -105,13 +105,16 @@ export function App() {
 
               const list = [
                 { id: 'mappings', collectionName: 'mappings', displayName: 'mappings' },
-                ...finalImports.map((i) => ({
-                  id: i.collectionName,
-                  collectionName: i.collectionName,
-                  displayName: i.displayName || (i.collectionName && i.collectionName.startsWith(prefix) ? i.collectionName.slice(prefix.length) : i.collectionName),
-                  type: i.type || null,
-                  readable: typeof i.readable === 'boolean' ? i.readable : true,
-                })),
+                ...finalImports.map((i) => {
+                  const base = i.displayName || (i.collectionName && i.collectionName.startsWith(prefix) ? i.collectionName.slice(prefix.length) : i.collectionName);
+                  return ({
+                    id: i.collectionName,
+                    collectionName: i.collectionName,
+                    displayName: (i.type && String(i.type).toLowerCase() === 'ongoing') ? `${base} (ongoing)` : base,
+                    type: i.type || null,
+                    readable: typeof i.readable === 'boolean' ? i.readable : true,
+                  });
+                }),
               ];
               setAvailableCollections(list);
               // Debug: report available collections for troubleshooting
@@ -338,333 +341,81 @@ export function App() {
   const handleImportMappings = async (records = [], options = {}) => {
     if (!currentUser || records.length === 0) return;
 
+    // Lazy-load importService to avoid circular imports at module load time
+    const { importMappings } = await import('../lib/importService.js');
+
     const mode = options.mode || 'add'; // 'add' or 'replace'
     const onProgress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
+    const forceOngoing = Boolean(options.forceOngoing);
 
-    // Prepare counts for progress reporting
+    // Prepare ids to delete for replace mode
     const idsToDelete = mode === 'replace' ? mappings.filter((m) => m?.id).map((m) => m.id) : [];
-    const totalSteps = Math.max(1, idsToDelete.length + records.length);
-    let processedSteps = 0;
-
-    // If creating a new collection, prepare a unique collection name
-    let targetCollection = null;
-    let targetDisplayName = null;
-    if (mode === 'newCollection') {
-      // allow caller to provide a collectionName; otherwise generate a timestamped name
-      if (options.collectionName && typeof options.collectionName === 'string' && options.collectionName.trim()) {
-        // sanitize: allow only letters, numbers, hyphens, underscores
-        const raw = String(options.collectionName).trim();
-        const sanitized = raw.replace(/[^A-Za-z0-9_-]/g, '_');
-        // If user accidentally included the required prefix with their uid, allow it
-        const prefix = `mappings_import_${currentUser.uid}`;
-        if (sanitized.startsWith('mappings_import_')) {
-          // If they supplied a prefix for another user, override to ensure it's under this user's UID
-          if (!sanitized.startsWith(prefix)) {
-            targetCollection = `${prefix}_${sanitized.replace(/^mappings_import_/, '')}`;
-            targetDisplayName = sanitized.replace(/^mappings_import_/, '');
-          } else {
-            targetCollection = sanitized;
-            targetDisplayName = sanitized.slice(prefix.length + 1) || null;
-          }
-        } else {
-          targetCollection = `${prefix}_${sanitized}`;
-          targetDisplayName = sanitized;
-        }
-      } else {
-        const safeTs = new Date().toISOString().replace(/[:.]/g, '-');
-        targetCollection = `mappings_import_${currentUser.uid}_${safeTs}`;
-        targetDisplayName = safeTs;
-      }
-    }
-
-    // If replace mode, delete all existing mappings for the current user first
-    if (mode === 'replace') {
-      try {
-        if (idsToDelete.length > 0) {
-          for (const id of idsToDelete) {
-            // eslint-disable-next-line no-await-in-loop
-            await deleteMapping(id);
-            processedSteps += 1;
-            onProgress(Math.min(100, Math.round((processedSteps / totalSteps) * 100)));
-          }
-        }
-        // Clear local state immediately so UI reflects replacement
-        setMappings([]);
-      } catch (err) {
-        console.error('Error clearing existing mappings for replace:', err);
-        setToastTick((t) => t + 1);
-        setToast({ type: 'error', message: err?.message || 'Failed to clear existing mappings before replace.' });
-        throw err;
-      }
-    }
-
-    // If creating a new collection from raw sheet headers, handle that path separately
-    if (mode === 'newCollection' && options.rawImport && Array.isArray(options.rawImport) && options.rawImport.length > 0) {
-      const flat = [];
-      options.rawImport.forEach((s) => {
-        const sheetName = s.sheetName || '';
-        (s.rawRecords || []).forEach((r) => flat.push({ ...r, sheet: sheetName }));
-      });
-
-      const totalFlat = Math.max(1, flat.length);
-      let processedFlat = 0;
-      let createdFlat = 0;
-      let fallbackFlat = false;
-
-      try {
-        const fallbackTargetMappings = [...mappings];
-        for (const doc of flat) {
-          try {
-            const shouldForceOngoing = options && (options.forceOngoing || options.targetTab === 'ongoing');
-            const writeDoc = { ...doc, userId: currentUser.uid };
-            if (shouldForceOngoing) writeDoc._ongoing = true;
-            await addMappingToCollection(targetCollection, writeDoc);
-            createdFlat += 1;
-            } catch (err) {
-            const msg = String(err?.message || '').toLowerCase();
-            if (msg.includes('permission') || msg.includes('missing') || msg.includes('insufficient')) {
-              const shouldForceOngoing = options && (options.forceOngoing || options.targetTab === 'ongoing');
-              const writeDoc = { ...doc, importCollection: targetCollection, userId: currentUser.uid };
-              if (shouldForceOngoing) writeDoc._ongoing = true;
-              const mappingId = await addMapping(writeDoc);
-              fallbackTargetMappings.push({ id: mappingId, ...writeDoc });
-              createdFlat += 1;
-              fallbackFlat = true;
-            } else {
-              throw err;
-            }
-          }
-
-          processedFlat += 1;
-          onProgress(Math.min(100, Math.round((processedFlat / totalFlat) * 100)));
-        }
-
-        setMappings(fallbackTargetMappings);
-        setToastTick((t) => t + 1);
-        const successMessage = `Import complete: ${createdFlat} records added to collection ${targetDisplayName || targetCollection}.`;
-        const finalMessage = fallbackFlat
-          ? `${successMessage} Note: your project security rules prevented creating a new collection; imported records were written into the main 'mappings' collection and tagged with the importCollection name.`
-          : successMessage;
-        setToast({ type: 'success', message: finalMessage });
-        onProgress(100);
-
-            if (!fallbackFlat) {
-            try {
-            const meta = { count: createdFlat, displayName: targetDisplayName };
-            // If the caller requested forcing into an ongoing collection, or the
-            // import originated from the ongoing tab, persist that metadata
-            if (options && (options.forceOngoing || options.targetTab === 'ongoing')) meta.type = 'ongoing';
-            await registerImportCollection(currentUser.uid, targetCollection, meta);
-            const imports = await getUserImportCollections(currentUser.uid);
-            const prefix = `mappings_import_${currentUser.uid}_`;
-            const visibleImports = imports.filter((i) => Number(i.count) > 0 && i.collectionName && String(i.collectionName).trim());
-            const checked = await Promise.all(
-              visibleImports.map(async (i) => {
-                try {
-                  const docs = await getMappingsFromCollection(i.collectionName);
-                  const docsArray = Array.isArray(docs) ? docs : [];
-                  const importMeta = { ...i };
-                  if (docsArray.some((d) => d && (d._ongoing === true || String(d.importCollection || '').toLowerCase().includes('ongoing') || String(i.collectionName || '').toLowerCase().includes('ongoing')))) {
-                    importMeta.type = 'ongoing';
-                  }
-                  importMeta.readable = true;
-                  return { importMeta, docsCount: docsArray.length };
-                } catch (err) {
-                  const importMeta = { ...i, readable: false };
-                  return { importMeta, docsCount: -1 };
-                }
-              })
-            );
-            const finalImports = checked.filter((c) => c.docsCount > 0).map((c) => c.importMeta);
-            const list = [{ id: 'mappings', collectionName: 'mappings', displayName: 'mappings' }, ...finalImports.map((i) => ({ id: i.collectionName, collectionName: i.collectionName, displayName: i.displayName || (i.collectionName && i.collectionName.startsWith(prefix) ? i.collectionName.slice(prefix.length) : i.collectionName) }))];
-            setAvailableCollections(list);
-            setSelectedCollection(targetCollection);
-            const newMappings = await getMappingsFromCollection(targetCollection);
-            setMappings(newMappings);
-          } catch (err) {
-            console.warn('Failed to register or load new import collection', err);
-          }
-        }
-
-        return;
-      } catch (err) {
-        console.error('Error importing raw sheets into new collection:', err);
-        setToastTick((t) => t + 1);
-        setToast({ type: 'error', message: err?.message || 'Failed to import mappings.' });
-        throw err;
-      }
-    }
-
-    const existingBySurvey = new Map(
-      (mode === 'replace' ? [] : mappings).map((m) => [String(m.surveyNumber || '').trim().toLowerCase(), m])
-    );
-    const nextMappings = mode === 'replace' ? [] : [...mappings];
-    let createdCount = 0;
-    let updatedCount = 0;
-    let skippedCount = 0;
-    let fallbackToMappings = false;
 
     try {
-      for (const record of records) {
-        const surveyNumber = String(record.surveyNumber || '').trim();
-        if (!surveyNumber) {
-          skippedCount += 1;
-          processedSteps += 1;
-          onProgress(Math.min(100, Math.round((processedSteps / totalSteps) * 100)));
-          continue;
-        }
-
-        const municipalities = Array.isArray(record.municipalities)
-          ? record.municipalities
-          : (record.municipality ? String(record.municipality).split(',').map((v) => v.trim()).filter(Boolean) : []);
-        const barangays = Array.isArray(record.barangays)
-          ? record.barangays
-          : (record.barangays ? String(record.barangays).split(',').map((v) => v.trim()).filter(Boolean) : []);
-
-        const newMapping = {
-          ...record, // Preserve ALL fields from imported record (including NCIP fields)
-          userId: currentUser.uid,
-          surveyNumber,
-          region: record.region || '',
-          province: record.province || '',
-          municipality: municipalities.join(', '),
-          municipalities,
-          barangays,
-          icc: record.icc || [],
-          remarks: record.remarks || '',
-          totalArea: record.totalArea || 0,
-        };
-        // If the import was initiated while the user was on the 'ongoing' tab,
-        // mark imported mappings with an internal flag so the Dashboard shows
-        // them in the Ongoing view. Apply to all users (not just NCIP).
-        if (options && options.targetTab === 'ongoing') {
-          newMapping._ongoing = true;
-        }
-
-        const key = surveyNumber.toLowerCase();
-        const existing = existingBySurvey.get(key);
-
-        if (mode === 'newCollection') {
-            try {
-            const shouldForceOngoing = options && (options.forceOngoing || options.targetTab === 'ongoing');
-            const writeDoc = { ...newMapping, userId: currentUser.uid };
-            if (shouldForceOngoing) writeDoc._ongoing = true;
-            const mappingId = await addMappingToCollection(targetCollection, writeDoc);
-            createdCount += 1;
-          } catch (err) {
-            // If permission denied for arbitrary collections, fall back to writing into 'mappings'
-            const msg = String(err?.message || '').toLowerCase();
-            if (msg.includes('permission') || msg.includes('missing') || msg.includes('insufficient')) {
-              // write into main `mappings` collection with an importCollection tag so users can find them
-              const shouldForceOngoing = options && (options.forceOngoing || options.targetTab === 'ongoing');
-              const writeDoc = { ...newMapping, importCollection: targetCollection };
-              if (shouldForceOngoing) writeDoc._ongoing = true;
-              const mappingId = await addMapping(writeDoc);
-              nextMappings.push({ id: mappingId, ...writeDoc });
-              createdCount += 1;
-              // flag will be surfaced after loop via toast (see below)
-              fallbackToMappings = true;
-            } else {
-              throw err;
-            }
-          }
-        } else if (existing?.id) {
-          await updateMapping(existing.id, { ...newMapping });
-          const idx = nextMappings.findIndex((m) => m.id === existing.id);
-          if (idx !== -1) nextMappings[idx] = { ...existing, ...newMapping };
-          updatedCount += 1;
-        } else {
-          const mappingId = await addMapping({ ...newMapping });
-          nextMappings.push({ id: mappingId, ...newMapping });
-          createdCount += 1;
-        }
-
-        processedSteps += 1;
-        onProgress(Math.min(100, Math.round((processedSteps / totalSteps) * 100)));
+      // Ensure we pass a concrete collection name when creating a new collection.
+      let collectionNameToWrite = options.collectionName;
+      if (mode === 'newCollection' && !collectionNameToWrite) {
+        const safeTs = new Date().toISOString().replace(/[:.]/g, '-');
+        collectionNameToWrite = `mappings_import_${currentUser.uid}_${safeTs}`;
       }
+      const result = await importMappings({ preparedDocs: records, rawRecords: options.rawImport || [], mode, collectionName: collectionNameToWrite || (mode === 'newCollection' ? null : 'mappings'), userId: currentUser.uid, idsToDelete, onProgress, forceOngoing });
 
-      setMappings(nextMappings);
-      setToastTick((t) => t + 1);
-      // diagnostic: log a sample saved mapping so we can inspect persisted fields
+      // If importService returned a collectionName, try to refresh available imports
       try {
-        const sampleSaved = Array.isArray(nextMappings) && nextMappings.length ? nextMappings[0] : null;
-        console.log('IMPORT_DEBUG sampleSavedMapping:', sampleSaved);
-        if (sampleSaved && typeof sampleSaved === 'object') console.log('IMPORT_DEBUG sampleSavedKeys:', Object.keys(sampleSaved));
-      } catch (e) {
-        console.warn('IMPORT_DEBUG failed to log sampleSavedMapping', e);
-      }
-      const successMessage = mode === 'newCollection'
-        ? `Import complete: ${createdCount} records added to collection ${targetDisplayName || targetCollection}.`
-        : `Import complete: ${createdCount} added, ${updatedCount} updated, ${skippedCount} skipped.`;
-
-      const finalMessage = fallbackToMappings
-        ? `${successMessage} Note: your project security rules prevented creating a new collection; imported records were written into the main 'mappings' collection and tagged with the importCollection name.`
-        : successMessage;
-
-      setToast({ type: 'success', message: finalMessage });
-      onProgress(100);
-
-      // If we created a real new collection (no fallback), register and load it
-        if (!fallbackToMappings && mode === 'newCollection' && targetCollection) {
-          try {
-          const meta = { count: createdCount, displayName: targetDisplayName };
-        if (options && (options.forceOngoing || options.targetTab === 'ongoing')) meta.type = 'ongoing';
-          await registerImportCollection(currentUser.uid, targetCollection, meta);
-          const imports = await getUserImportCollections(currentUser.uid);
-          const prefix = `mappings_import_${currentUser.uid}_`;
-          const visibleImports = imports.filter((i) => Number(i.count) > 0 && i.collectionName && String(i.collectionName).trim());
-
-          const checked = await Promise.all(
-            visibleImports.map(async (i) => {
-              try {
-                const docs = await getMappingsFromCollection(i.collectionName);
-                const docsArray = Array.isArray(docs) ? docs : [];
-                const importMeta = { ...i };
-                if (docsArray.some((d) => d && (d._ongoing === true || String(d.importCollection || '').toLowerCase().includes('ongoing') || String(i.collectionName || '').toLowerCase().includes('ongoing')))) {
-                  importMeta.type = 'ongoing';
-                }
-                  // If we fell back to writing into `mappings`, ensure the UI shows the mappings collection
-                  if (fallbackToMappings) {
-                    try {
-                      setSelectedCollection('mappings');
-                    } catch (e) {
-                      /* ignore */
-                    }
-                  }
-                importMeta.readable = true;
-                return { importMeta, docsCount: docsArray.length };
-              } catch (err) {
-                const importMeta = { ...i, readable: false };
-                return { importMeta, docsCount: -1 };
+        const imports = await getUserImportCollections(currentUser.uid);
+        const prefix = `mappings_import_${currentUser.uid}_`;
+        const visibleImports = imports.filter((i) => Number(i.count) > 0 && i.collectionName && String(i.collectionName).trim());
+        const checked = await Promise.all(
+          visibleImports.map(async (i) => {
+            try {
+              const docs = await getMappingsFromCollection(i.collectionName);
+              const docsArray = Array.isArray(docs) ? docs : [];
+              const importMeta = { ...i };
+              if (docsArray.some((d) => d && (d._ongoing === true || String(d.importCollection || '').toLowerCase().includes('ongoing') || String(i.collectionName || '').toLowerCase().includes('ongoing')))) {
+                importMeta.type = 'ongoing';
               }
-            })
-          );
-
-          const finalImports = checked.filter((c) => c.docsCount > 0).map((c) => c.importMeta);
-
-          const list = [
-              { id: 'mappings', collectionName: 'mappings', displayName: 'mappings' },
-              ...finalImports.map((i) => ({
-                id: i.collectionName,
-                collectionName: i.collectionName,
-                displayName: i.displayName || (i.collectionName && i.collectionName.startsWith(prefix) ? i.collectionName.slice(prefix.length) : i.collectionName),
-                type: i.type || null,
-                readable: typeof i.readable === 'boolean' ? i.readable : true,
-              })),
-          ];
-          setAvailableCollections(list);
-          setSelectedCollection(targetCollection);
-          const newMappings = await getMappingsFromCollection(targetCollection);
-          setMappings(newMappings);
-        } catch (err) {
-          console.warn('Failed to register or load new import collection', err);
-        }
+              importMeta.readable = true;
+              return { importMeta, docsCount: docsArray.length };
+            } catch (err) {
+              const importMeta = { ...i, readable: false };
+              return { importMeta, docsCount: -1 };
+            }
+          })
+        );
+        const finalImports = checked.filter((c) => c.docsCount > 0).map((c) => c.importMeta);
+        const list = [{ id: 'mappings', collectionName: 'mappings', displayName: 'mappings' }, ...finalImports.map((i) => {
+          const base = i.displayName || (i.collectionName && i.collectionName.startsWith(prefix) ? i.collectionName.slice(prefix.length) : i.collectionName);
+          return { id: i.collectionName, collectionName: i.collectionName, displayName: (i.type && String(i.type).toLowerCase() === 'ongoing') ? `${base} (ongoing)` : base };
+        })];
+        setAvailableCollections(list);
+      } catch (err) {
+        console.warn('Failed to refresh import collections after import', err);
       }
-    } catch (error) {
-      console.error('Error importing mappings:', error);
+
+      // Refresh mappings view depending on where we wrote
+      try {
+        if (result && result.collectionName && String(result.collectionName).toLowerCase() !== 'mappings') {
+          const newMappings = await getMappingsFromCollection(result.collectionName);
+          setMappings(newMappings);
+          setSelectedCollection(result.collectionName);
+        } else {
+          // Reload main mappings
+          const all = await getAllMappings();
+          setMappings(all);
+        }
+      } catch (err) {
+        console.warn('Failed to reload mappings after import', err);
+      }
+
       setToastTick((t) => t + 1);
-      setToast({ type: 'error', message: error?.message || 'Failed to import mappings.' });
-      throw error;
+      setToast({ type: 'success', message: `Import complete: ${result.created || 0} records added to ${result.collectionName || 'mappings'}.` });
+      onProgress(100);
+      return;
+    } catch (err) {
+      console.error('Import failed (importService):', err);
+      setToastTick((t) => t + 1);
+      setToast({ type: 'error', message: err?.message || 'Failed to import mappings.' });
+      throw err;
     }
   };
 
