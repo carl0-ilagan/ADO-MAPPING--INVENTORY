@@ -212,6 +212,71 @@ export function Dashboard({
     return `${items.slice(0, 2).join(', ')}...`;
   };
 
+  const displayValue = (val) => {
+    const isFirestoreTimestampLikeString = (s) => {
+      if (typeof s !== 'string') return null;
+      const m = s.match(/Timestamp\(seconds=(\d+),\s*nanoseconds=(\d+)\)/);
+      if (m) return { seconds: Number(m[1]), nanoseconds: Number(m[2]) };
+      return null;
+    };
+
+    const toDateFromTs = (ts) => {
+      try {
+        if (!ts) return null;
+        if (typeof ts.toDate === 'function') return ts.toDate();
+        if (typeof ts.seconds === 'number') return new Date(ts.seconds * 1000 + Math.floor((ts.nanoseconds || 0) / 1e6));
+      } catch (e) {}
+      return null;
+    };
+
+    if (val === null || typeof val === 'undefined') return '-';
+    if (Array.isArray(val)) {
+      const out = val.map((v) => displayValue(v)).filter((v) => v && v !== '-');
+      return out.length ? out.join(', ') : '-';
+    }
+    if (typeof val === 'string') {
+      const tsLike = isFirestoreTimestampLikeString(val);
+      if (tsLike) {
+        const d = toDateFromTs(tsLike);
+        return d ? d.toLocaleString() : '-';
+      }
+      const s = val.trim();
+      if (!s) return '-';
+      const low = s.toLowerCase();
+      if (low === 'null' || low === 'undefined') return '-';
+      // Treat Firestore-like document IDs or long alphanumeric tokens as missing
+      if (/^[A-Za-z0-9_-]{16,40}$/.test(s)) return '-';
+      return s;
+    }
+    if (typeof val === 'number') {
+      if (val === 0) return '-';
+      return String(val);
+    }
+    if (typeof val === 'boolean') return String(val);
+    if (typeof val === 'object') {
+      // Firestore Timestamp object or similar
+      const d = toDateFromTs(val);
+      if (d) return d.toLocaleString();
+      if (val instanceof Date) return val.toLocaleString();
+      if (val.name) return String(val.name);
+      if (val.label) return String(val.label);
+      try {
+        const s = JSON.stringify(val);
+        if (s && s !== '{}' && s !== '[]') return s;
+      } catch (e) {}
+      return '-';
+    }
+    return '-';
+  };
+
+  const formatAreaValue = (v) => {
+    if (v === null || typeof v === 'undefined' || v === '') return '-';
+    if (typeof v === 'number') return v.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+    const n = parseFloat(String(v).replace(/,/g, ''));
+    if (isNaN(n)) return '-';
+    return n.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+  };
+
   const isInventoryUser = (user?.email || '').toLowerCase() === 'ncip@inventory.gov.ph';
   const NCIP_TABLE_HEADERS = [
     'No.',
@@ -239,35 +304,87 @@ export function Dashboard({
       for (const k of keys) {
         if (!k) continue;
         const val = mapping[k];
-        if (val === null || typeof val === 'undefined' || val === '') continue;
+        if (val === null || typeof val === 'undefined') continue;
+        if (typeof val === 'string') {
+          const s = val.trim();
+          if (!s) continue;
+          const low = s.toLowerCase();
+          if (low === 'null' || low === 'undefined') continue;
+          return s;
+        }
         if (Array.isArray(val)) return val.length ? val.join(', ') : null;
+        if (typeof val === 'number' || typeof val === 'boolean') return String(val);
+        if (typeof val === 'object') {
+          if (val === null) continue;
+          if (val.name) return String(val.name);
+          if (val.label) return String(val.label);
+          // try to stringify small objects
+          try {
+            const s = JSON.stringify(val);
+            if (s && s !== '{}' && s !== '[]') return s;
+          } catch (e) {
+            // ignore
+          }
+          continue;
+        }
         return String(val);
       }
       return null;
     };
 
-    if (h === 'no.' || h === 'survey number') return getField(['surveyNumber', 'survey_number', 'controlNumber', 'control_number']) || '-';
+    // If not found on top-level, attempt to find under nested `ongoing` or `raw_fields`
+    const tryNested = (keys) => {
+      for (const k of keys) {
+        if (!k) continue;
+        // try as-is in ongoing
+        try {
+          if (mapping && mapping.ongoing && typeof mapping.ongoing === 'object') {
+            const v = mapping.ongoing[k];
+            if (v !== null && typeof v !== 'undefined' && String(v).trim() !== '') return String(v);
+          }
+        } catch (e) {}
+        // try safe key in raw_fields (normalized during import)
+        try {
+          if (mapping && mapping.raw_fields && typeof mapping.raw_fields === 'object') {
+            const safe = String(k || '').trim().replace(/\s+/g, '_').replace(/[^A-Za-z0-9_]/g, '_').toLowerCase();
+            const vv = mapping.raw_fields[k] || mapping.raw_fields[safe] || mapping.raw_fields[safe.toLowerCase()];
+            if (vv !== null && typeof vv !== 'undefined' && String(vv).trim() !== '') return String(vv);
+          }
+        } catch (e) {}
+      }
+      return null;
+    };
+
+    const getBest = (keys) => {
+      const a = getField(keys);
+      if (a !== null && typeof a !== 'undefined') return a;
+      const b = tryNested(keys);
+      if (b !== null && typeof b !== 'undefined') return b;
+      return null;
+    };
+
+    if (h === 'no.' || h === 'survey number') return displayValue(getBest(['surveyNumber', 'survey_number', 'controlNumber', 'control_number']));
     if (h === 'region') {
-      const raw = getField(['region', 'regionName', 'region_name']);
-      const canon = canonicalRegion(raw || mapping.region);
-      return canon || '-';
+      const raw = getBest(['region', 'regionName', 'region_name']) || mapping.region;
+      const canon = canonicalRegion(raw);
+      return displayValue(canon || raw);
     }
-    if (h === 'control number') return getField(['controlNumber', 'control_number', 'surveyNumber', 'survey_number']) || '-';
-    if (h.includes('applicant') || h.includes('proponent')) return getField(['proponent', 'applicantProponent', 'applicant_proponent', 'applicant', 'applicant_name', 'applicantName']) || '-';
-    if (h.includes('name of project') || (h.includes('name') && !h.includes('region'))) return getField(['nameOfProject', 'name_of_project', 'projectName', 'project_name', 'name', 'title']) || '-';
+    if (h === 'control number') return displayValue(getBest(['controlNumber', 'control_number', 'surveyNumber', 'survey_number']));
+    if (h.includes('applicant') || h.includes('proponent')) return displayValue(getBest(['proponent', 'applicantProponent', 'applicant_proponent', 'applicant', 'applicant_name', 'applicantName']));
+    if (h.includes('name of project') || (h.includes('name') && !h.includes('region'))) return displayValue(getBest(['nameOfProject', 'name_of_project', 'projectName', 'project_name', 'name', 'title']));
     if (h.includes('nature')) return getField(['natureOfProject', 'nature_of_project', 'nature', 'projectNature']) || '-';
     
-    if (h.includes('cadt')) return getField(['cadtStatus', 'cadt_status', 'cadt']) || '-';
-    if (h === 'icc' || h.includes('icc')) return getField(['icc', 'iccs', 'affectedICC', 'affected_icc', 'affected_iccs']) || '-';
-    if (h === 'location') return getField(['location', 'province', 'provinceName', 'province_name', 'location_full']) || '-';
-    if (h.includes('year')) return getField(['yearApproved', 'year_approved', 'year', 'approvedYear']) || '-';
-    if (h.includes('moa duration') || h === 'moa duration') return getField(['moaDuration', 'moa_duration', 'moa']) || '-';
-    if (h.includes('province')) return getField(['province', 'provinceName', 'province_name']) || '-';
-    if (h.includes('municipality')) return getField(['municipality', 'municipalities']) || '-';
-    if (h.includes('barangay')) return getField(['barangays']) || '-';
-    if (h.includes('area')) return getField(['totalArea', 'area', 'area_ha']) || '-';
-    if (h.includes('community')) return getField(['communityBenefits', 'community_benefits', 'community']) || '-';
-    if (h.includes('remark')) return getField(['remarks', 'remark', 'notes']) || '-';
+    if (h.includes('cadt')) return displayValue(getBest(['cadtStatus', 'cadt_status', 'cadt']));
+    if (h === 'icc' || h.includes('icc')) return displayValue(getBest(['icc', 'iccs', 'affectedICC', 'affected_icc', 'affected_iccs']));
+    if (h === 'location') return displayValue(getBest(['location', 'province', 'provinceName', 'province_name', 'location_full']));
+    if (h.includes('year')) return displayValue(getBest(['yearApproved', 'year_approved', 'year', 'approvedYear']));
+    if (h.includes('moa duration') || h === 'moa duration') return displayValue(getBest(['moaDuration', 'moa_duration', 'moa']));
+    if (h.includes('province')) return displayValue(getBest(['province', 'provinceName', 'province_name']));
+    if (h.includes('municipality')) return displayValue(getBest(['municipality', 'municipalities']));
+    if (h.includes('barangay')) return displayValue(getBest(['barangays']));
+    if (h.includes('area')) return displayValue(getBest(['totalArea', 'area', 'area_ha']));
+    if (h.includes('community')) return displayValue(getBest(['communityBenefits', 'community_benefits', 'community']));
+    if (h.includes('remark')) return displayValue(getBest(['remarks', 'remark', 'notes']));
     return '-';
   };
 
@@ -2649,42 +2766,40 @@ export function Dashboard({
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
-                          <p className="text-xs text-[#0A2D55]/60 font-medium">SURVEY NUMBER</p>
-                          <p className="text-sm font-bold text-[#0A2D55] truncate">{mapping.surveyNumber}</p>
+                            <p className="text-xs text-[#0A2D55]/60 font-medium">SURVEY NUMBER</p>
+                            <p className="text-sm font-bold text-[#0A2D55] truncate">{displayValue(mapping.surveyNumber)}</p>
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <div>
                           <p className="text-xs text-[#0A2D55]/60 font-medium">REGION</p>
-                          <p className="text-xs text-[#0A2D55]/90 truncate">{mapping.region || '-'}</p>
+                          <p className="text-xs text-[#0A2D55]/90 truncate">{displayValue(mapping.region)}</p>
                         </div>
                         <div>
                           <p className="text-xs text-[#0A2D55]/60 font-medium">AREA (HA)</p>
-                          <p className="text-xs text-[#0A2D55]/90 font-mono">
-                            {mapping.totalArea?.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
-                          </p>
+                          <p className="text-xs text-[#0A2D55]/90 font-mono">{formatAreaValue(mapping.totalArea)}</p>
                         </div>
                       </div>
                       <div>
                         <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">Province</p>
-                        <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{mapping.province || '-'}</p>
+                        <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(mapping.province)}</p>
                       </div>
                       <div>
                         <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">Municipality/ies</p>
-                        <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{getMunicipalities(mapping) || '-'}</p>
+                        <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(getMunicipalities(mapping) || '')}</p>
                       </div>
                       <div>
                         <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">Barangay/s</p>
-                        <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{getBarangays(mapping) || '-'}</p>
+                        <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(getBarangays(mapping) || '')}</p>
                       </div>
                       <div>
                         <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">ICCS/IPS</p>
-                        <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{mapping.icc?.join(', ') || '-'}</p>
+                        <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(mapping.icc?.join(', '))}</p>
                       </div>
-                      {mapping.remarks && (
+                      {displayValue(mapping.remarks) !== '-' && (
                         <div>
                           <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">Remarks</p>
-                          <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{mapping.remarks}</p>
+                          <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(mapping.remarks)}</p>
                         </div>
                       )}
                       <div className="flex items-center gap-2 pt-1">
@@ -2897,7 +3012,7 @@ export function Dashboard({
                             paginatedOngoing.map((m, idx) => (
                               <tr key={m.id || idx} className="border-b border-[#0A2D55]/10">
                                 {currentOngoingTab.keys.map((k, j) => (
-                                  <td key={j} className="px-2.5 sm:px-3 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal text-center">{getOngoingField(m, k)}</td>
+                                  <td key={j} className="px-2.5 sm:px-3 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal text-center">{displayValue(getOngoingField(m, k))}</td>
                                 ))}
                                 <td className="px-2.5 sm:px-3 py-2 text-[12px] text-[#0A2D55]/80 w-[110px] sticky right-0 bg-white shadow-[-6px_0_10px_rgba(7,26,44,0.06)]">
                                   <div className="flex items-center gap-1.5 justify-end">
@@ -3259,67 +3374,65 @@ export function Dashboard({
                       {/* NCIP Inventory User View */}
                       <div>
                         <p className="text-xs font-semibold text-white/70">No. (Survey Number)</p>
-                        <p className="text-white font-semibold mt-1">{getOngoingField(selectedMapping, 'surveyNumber') || '-'}</p>
+                        <p className="text-white font-semibold mt-1">{displayValue(getOngoingField(selectedMapping, 'surveyNumber') || selectedMapping.surveyNumber)}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Region</p>
-                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'region') || selectedMapping.region || '-'}</p>
+                        <p className="text-white mt-1">{displayValue(getOngoingField(selectedMapping, 'region') || selectedMapping.region)}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Control Number</p>
-                        <p className="text-white font-semibold mt-1">{getOngoingField(selectedMapping, 'controlNumber') || '-'}</p>
+                        <p className="text-white font-semibold mt-1">{displayValue(getOngoingField(selectedMapping, 'controlNumber') || selectedMapping.controlNumber)}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Proponent</p>
-                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'proponent') || getOngoingField(selectedMapping, 'applicant') || selectedMapping.proponent || '-'}</p>
+                        <p className="text-white mt-1">{displayValue(getOngoingField(selectedMapping, 'proponent') || getOngoingField(selectedMapping, 'applicant') || selectedMapping.proponent)}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Name of Project</p>
-                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'nameOfProject') || '-'}</p>
+                        <p className="text-white mt-1">{displayValue(getOngoingField(selectedMapping, 'nameOfProject') || selectedMapping.nameOfProject)}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Location</p>
-                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'location') || '-'}</p>
+                        <p className="text-white mt-1">{displayValue(getOngoingField(selectedMapping, 'location') || selectedMapping.location)}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Project Area (ha)</p>
-                        <p className="text-white font-mono mt-1">{
-                          (() => {
-                            const rawArea = getOngoingField(selectedMapping, 'area') || getOngoingField(selectedMapping, 'totalArea') || selectedMapping?.project_area_in_hectares || selectedMapping?.projectAreaInHectares || selectedMapping?.totalArea || '';
-                            const num = parseAreaValue(rawArea);
-                            return num ? num.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 }) : '-';
-                          })()
-                        }</p>
+                        <p className="text-white font-mono mt-1">{displayValue((() => {
+                          const rawArea = getOngoingField(selectedMapping, 'area') || getOngoingField(selectedMapping, 'totalArea') || selectedMapping?.project_area_in_hectares || selectedMapping?.projectAreaInHectares || selectedMapping?.totalArea || '';
+                          const num = parseAreaValue(rawArea);
+                          return num ? num.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 }) : '';
+                        })())}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Nature of Project</p>
-                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'typeOfProject') || getOngoingField(selectedMapping, 'natureOfProject') || '-'}</p>
+                        <p className="text-white mt-1">{displayValue(getOngoingField(selectedMapping, 'typeOfProject') || getOngoingField(selectedMapping, 'natureOfProject') || selectedMapping.natureOfProject)}</p>
                       </div>
                       
                       <div>
                         <p className="text-xs font-semibold text-white/70">CADT Status</p>
-                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'cadtStatus') || getOngoingField(selectedMapping, 'cadt') || '-'}</p>
+                        <p className="text-white mt-1">{displayValue(getOngoingField(selectedMapping, 'cadtStatus') || getOngoingField(selectedMapping, 'cadt') || selectedMapping.cadtStatus)}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Affected ICC</p>
-                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'iccs') || getOngoingField(selectedMapping, 'icc') || (selectedMapping.icc ? (Array.isArray(selectedMapping.icc) ? selectedMapping.icc.join(', ') : selectedMapping.icc) : '-')}</p>
+                        <p className="text-white mt-1">{displayValue(getOngoingField(selectedMapping, 'iccs') || getOngoingField(selectedMapping, 'icc') || (selectedMapping.icc ? (Array.isArray(selectedMapping.icc) ? selectedMapping.icc.join(', ') : selectedMapping.icc) : ''))}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Year Approved</p>
-                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'yearApproved') || '-'}</p>
+                        <p className="text-white mt-1">{displayValue(getOngoingField(selectedMapping, 'yearApproved') || selectedMapping.yearApproved)}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">MOA Duration</p>
-                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'moaDuration') || '-'}</p>
+                        <p className="text-white mt-1">{displayValue(getOngoingField(selectedMapping, 'moaDuration') || selectedMapping.moaDuration)}</p>
                       </div>
                       <div className="sm:col-span-2">
                         <p className="text-xs font-semibold text-white/70">Community Benefits</p>
-                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'communityBenefits') || '-'}</p>
+                        <p className="text-white mt-1">{displayValue(getOngoingField(selectedMapping, 'communityBenefits') || selectedMapping.communityBenefits)}</p>
                       </div>
-                      {getOngoingField(selectedMapping, 'remarks') && (
+                      {displayValue(getOngoingField(selectedMapping, 'remarks') || selectedMapping.remarks) !== '-' && (
                         <div className="sm:col-span-2">
                           <p className="text-xs font-semibold text-white/70">Remarks</p>
-                          <p className="text-white mt-1">{getOngoingField(selectedMapping, 'remarks')}</p>
+                          <p className="text-white mt-1">{displayValue(getOngoingField(selectedMapping, 'remarks') || selectedMapping.remarks)}</p>
                         </div>
                       )}
                     </>
@@ -3328,37 +3441,38 @@ export function Dashboard({
                       {/* Regular User View */}
                       <div>
                         <p className="text-xs font-semibold text-white/70">Survey Number</p>
-                        <p className="text-white font-semibold mt-1">{getOngoingField(selectedMapping, 'surveyNumber') || '-'}</p>
+                        <p className="text-white font-semibold mt-1">{displayValue(getOngoingField(selectedMapping, 'surveyNumber') || selectedMapping.surveyNumber)}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Total Area (ha)</p>
-                        <p className="text-white font-mono mt-1">
-                          {String(parseAreaValue(getOngoingField(selectedMapping, 'totalArea') || selectedMapping.totalArea)).replace('0','0') ? parseAreaValue(getOngoingField(selectedMapping, 'totalArea') || selectedMapping.totalArea).toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 }) : '-'}
-                        </p>
+                        <p className="text-white font-mono mt-1">{displayValue((() => {
+                          const n = parseAreaValue(getOngoingField(selectedMapping, 'totalArea') || selectedMapping.totalArea);
+                          return n ? n.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 }) : '';
+                        })())}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Region</p>
-                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'region') || selectedMapping.region || '-'}</p>
+                        <p className="text-white mt-1">{displayValue(getOngoingField(selectedMapping, 'region') || selectedMapping.region)}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Province</p>
-                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'province') || selectedMapping.province || '-'}</p>
+                        <p className="text-white mt-1">{displayValue(getOngoingField(selectedMapping, 'province') || selectedMapping.province)}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Municipality/ies</p>
-                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'municipality') || getOngoingField(selectedMapping, 'municipalities') || getMunicipalitiesFull(selectedMapping) || '-'}</p>
+                        <p className="text-white mt-1">{displayValue(getOngoingField(selectedMapping, 'municipality') || getOngoingField(selectedMapping, 'municipalities') || getMunicipalitiesFull(selectedMapping))}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/70">Barangay/s</p>
-                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'barangay') || getOngoingField(selectedMapping, 'barangays') || getBarangaysFull(selectedMapping) || '-'}</p>
+                        <p className="text-white mt-1">{displayValue(getOngoingField(selectedMapping, 'barangay') || getOngoingField(selectedMapping, 'barangays') || getBarangaysFull(selectedMapping))}</p>
                       </div>
                       <div className="sm:col-span-2">
                         <p className="text-xs font-semibold text-white/70">ICCs/IPs</p>
-                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'iccs') || getOngoingField(selectedMapping, 'icc') || (selectedMapping.icc ? (Array.isArray(selectedMapping.icc) ? selectedMapping.icc.join(', ') : selectedMapping.icc) : '-')}</p>
+                        <p className="text-white mt-1">{displayValue(getOngoingField(selectedMapping, 'iccs') || getOngoingField(selectedMapping, 'icc') || (selectedMapping.icc ? (Array.isArray(selectedMapping.icc) ? selectedMapping.icc.join(', ') : selectedMapping.icc) : ''))}</p>
                       </div>
                       <div className="sm:col-span-2">
                         <p className="text-xs font-semibold text-white/70">Remarks</p>
-                        <p className="text-white mt-1">{getOngoingField(selectedMapping, 'remarks') || selectedMapping.remarks || '-'}</p>
+                        <p className="text-white mt-1">{displayValue(getOngoingField(selectedMapping, 'remarks') || selectedMapping.remarks)}</p>
                       </div>
                     </>
                   )}

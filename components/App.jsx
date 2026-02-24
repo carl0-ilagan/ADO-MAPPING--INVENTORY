@@ -43,7 +43,9 @@ export function App() {
         ].filter(Boolean).map((s) => String(s || '').trim()).filter(Boolean);
 
         for (const c of candidates) {
-          if (c.length > 2 && !/^[A-Za-z0-9_-]{20}$/.test(c)) return c;
+          // Exclude tokens that look like Firestore document IDs (alphanumeric/hyphen/underscore, length 16-40)
+          const looksLikeId = /^[A-Za-z0-9_-]{16,40}$/.test(c);
+          if (c.length > 2 && !looksLikeId) return c;
         }
         return (candidates[0] && String(candidates[0])) || '';
       } catch (e) {
