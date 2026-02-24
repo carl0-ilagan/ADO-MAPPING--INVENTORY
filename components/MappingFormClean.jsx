@@ -76,7 +76,7 @@ async function fetchJson(url) {
   return res.json();
 }
 
-function SearchableSelect({ options = [], selected = null, onChange = () => {}, placeholder = "Select", multi = false, disabled = false, summaryLabels = { singular: "item", plural: "items" }, allowCustom = false }) {
+function SearchableSelect({ options = [], selected = null, onChange = () => {}, placeholder = "Select", multi = false, disabled = false, summaryLabels = { singular: "item", plural: "items" }, allowCustom = false, showSearch = true }) {
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
   const [search, setSearch] = useState("");
@@ -110,7 +110,7 @@ function SearchableSelect({ options = [], selected = null, onChange = () => {}, 
     };
   }, [open]);
 
-  const filtered = options.filter((o) => String(o.name).toLowerCase().includes(search.toLowerCase()));
+  const filtered = showSearch ? options.filter((o) => String(o.name).toLowerCase().includes(search.toLowerCase())) : options;
 
   const handleToggle = (code) => {
     if (!multi) {
@@ -199,21 +199,23 @@ function SearchableSelect({ options = [], selected = null, onChange = () => {}, 
             closing ? "opacity-0 scale-95 -translate-y-1" : "opacity-100 scale-100 translate-y-0"
           )}
         >
-          <div className="p-3 sticky top-0 bg-white border-b border-[#0A2D55]/10">
-            <input 
-              ref={inputRef}
-              value={search} 
-              onChange={(e) => setSearch(e.target.value)} 
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && allowCustom && search.trim()) {
-                  e.preventDefault();
-                  handleCustomValue();
-                }
-              }}
-              placeholder={allowCustom ? "Search or type custom..." : "Search..."} 
-              className="w-full px-3 py-2 border-2 border-[#0A2D55]/10 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40" 
-            />
-          </div>
+          {showSearch && (
+            <div className="p-3 sticky top-0 bg-white border-b border-[#0A2D55]/10">
+              <input 
+                ref={inputRef}
+                value={search} 
+                onChange={(e) => setSearch(e.target.value)} 
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && allowCustom && search.trim()) {
+                    e.preventDefault();
+                    handleCustomValue();
+                  }
+                }}
+                placeholder={allowCustom ? "Search or type custom..." : "Search..."} 
+                className="w-full px-3 py-2 border-2 border-[#0A2D55]/10 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40" 
+              />
+            </div>
+          )}
           <div className="p-2 max-h-72 overflow-y-auto">
             {filtered.length === 0 && !allowCustom && <p className="text-center text-sm text-[#0A2D55]/40 py-4">No results found</p>}
             {filtered.length === 0 && allowCustom && search.trim() && (
@@ -336,6 +338,38 @@ export default function MappingForm({
       .replace(/[^a-z0-9]+/g, '_')
       .replace(/^_+|_+$/g, '')
   );
+
+  const formatDateForInput = (v) => {
+    if (!v && v !== 0) return '';
+    try {
+      // Firestore Timestamp string like Timestamp(seconds=..., nanoseconds=...)
+      if (typeof v === 'string') {
+        const m = v.match(/Timestamp\(seconds=(\d+),\s*nanoseconds=(\d+)\)/);
+        if (m) {
+          const d = new Date(Number(m[1]) * 1000 + Math.floor(Number(m[2]) / 1e6));
+          return d.toISOString().slice(0, 10);
+        }
+        // ISO or other parseable date string
+        const d2 = new Date(v);
+        if (!isNaN(d2)) return d2.toISOString().slice(0, 10);
+        return '';
+      }
+      if (typeof v === 'object') {
+        if (typeof v.toDate === 'function') {
+          const d = v.toDate();
+          return d.toISOString().slice(0, 10);
+        }
+        if (typeof v.seconds === 'number') {
+          const d = new Date(v.seconds * 1000 + Math.floor((v.nanoseconds || 0) / 1e6));
+          return d.toISOString().slice(0, 10);
+        }
+        if (v instanceof Date) return v.toISOString().slice(0, 10);
+      }
+      return '';
+    } catch (e) {
+      return '';
+    }
+  };
 
   const toCamel = (s) => {
     if (!s) return '';
@@ -528,7 +562,12 @@ export default function MappingForm({
           : (typeof initialData[l] !== 'undefined' && initialData[l] !== null && String(initialData[l]).trim() !== '') ? initialData[l]
           : (typeof raw[k] !== 'undefined' && raw[k] !== null && String(raw[k]).trim() !== '') ? raw[k]
           : '';
-        od[k] = val;
+        // If this is the Date of Application field, normalize to yyyy-mm-dd for date input
+        if (k === 'date_of_application') {
+          od[k] = formatDateForInput(val);
+        } else {
+          od[k] = val;
+        }
       });
       setOngoingData((s) => ({ ...s, ...od }));
     } catch (e) {
@@ -822,10 +861,21 @@ export default function MappingForm({
                               onChange={(v) => setOngoingData((s) => ({ ...s, [key]: v }))}
                               placeholder="Select status"
                               allowCustom={false}
+                              showSearch={false}
                               disabled={false}
                             />
                           ) : (
-                            <input value={ongoingData[key] || ''} onChange={(e) => setOngoingData((s) => ({ ...s, [key]: e.target.value }))} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
+                            // If the field is Date of Application, render a date picker
+                            (key === 'date_of_application') ? (
+                              <input
+                                type="date"
+                                value={ongoingData[key] || ''}
+                                onChange={(e) => setOngoingData((s) => ({ ...s, [key]: e.target.value }))}
+                                className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition"
+                              />
+                            ) : (
+                              <input value={ongoingData[key] || ''} onChange={(e) => setOngoingData((s) => ({ ...s, [key]: e.target.value }))} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
+                            )
                           )}
                         </div>
                       );
@@ -889,6 +939,7 @@ export default function MappingForm({
                         onChange={(v) => setCadtStatus(v)}
                         placeholder="Select CADT status"
                         allowCustom={false}
+                        showSearch={false}
                         disabled={false}
                       />
                     </div>

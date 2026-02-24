@@ -180,6 +180,41 @@ export function Dashboard({
     return raw;
   };
 
+  // Derive a best-effort raw region string from a mapping document
+  const deriveRawRegion = (m) => {
+    if (!m) return '';
+    try {
+      if (m.region) return String(m.region);
+      if (m.ongoing && m.ongoing.region) return String(m.ongoing.region);
+      if (m.raw_fields && (m.raw_fields.region || m.raw_fields.sheet)) return String(m.raw_fields.region || m.raw_fields.sheet);
+      // scan top-level for any key that contains 'region' or 'sheet'
+      for (const k of Object.keys(m || {})) {
+        try {
+          const lk = String(k || '').toLowerCase();
+          if (lk.includes('region') || lk === 'sheet') {
+            const v = m[k];
+            if (v && String(v).trim() !== '') return String(v);
+          }
+        } catch (e) {}
+      }
+      // scan nested ongoing keys
+      if (m.ongoing && typeof m.ongoing === 'object') {
+        for (const k of Object.keys(m.ongoing || {})) {
+          try {
+            const lk = String(k || '').toLowerCase();
+            if (lk.includes('region')) {
+              const v = m.ongoing[k];
+              if (v && String(v).trim() !== '') return String(v);
+            }
+          } catch (e) {}
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+    return '';
+  };
+
   const formatMunicipalitiesExport = (mapping) => (
     mapping.municipality || (Array.isArray(mapping.municipalities) ? mapping.municipalities.join(', ') : '')
   );
@@ -482,7 +517,49 @@ export function Dashboard({
   const computeSummaryRows = (records = []) => {
     const regionMap = new Map();
     records.forEach((m) => {
-      const region = (canonicalRegion(m.region) || 'Unknown').toString();
+      // Derive a best-effort raw region value from several possible places
+      let rawRegion = '';
+      try {
+        if (m) {
+          if (m.region) rawRegion = m.region;
+          else if (m.ongoing && m.ongoing.region) rawRegion = m.ongoing.region;
+          else if (m.raw_fields && (m.raw_fields.region || m.raw_fields.sheet)) rawRegion = m.raw_fields.region || m.raw_fields.sheet;
+        }
+      } catch (e) {
+        rawRegion = m && m.region ? m.region : '';
+      }
+      // If still empty, try to find any top-level or nested key that looks like a region
+      try {
+        if (!rawRegion || String(rawRegion).trim() === '') {
+          // search top-level keys
+          for (const k of Object.keys(m || {})) {
+            try {
+              const lk = String(k || '').toLowerCase();
+              if (lk.includes('region') || lk === 'sheet') {
+                const v = m[k];
+                if (v && String(v).trim() !== '') { rawRegion = v; break; }
+              }
+            } catch (e) {}
+          }
+        }
+        if (!rawRegion || String(rawRegion).trim() === '') {
+          // search nested ongoing
+          if (m && m.ongoing && typeof m.ongoing === 'object') {
+            for (const k of Object.keys(m.ongoing || {})) {
+              try {
+                const lk = String(k || '').toLowerCase();
+                if (lk.includes('region')) {
+                  const v = m.ongoing[k];
+                  if (v && String(v).trim() !== '') { rawRegion = v; break; }
+                }
+              } catch (e) {}
+            }
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+      const region = (canonicalRegion(rawRegion) || 'Unknown').toString();
       if (!regionMap.has(region)) {
         regionMap.set(region, {
           region,
@@ -676,6 +753,44 @@ export function Dashboard({
     : [];
 
   const ongoingSummaryRows = computeSummaryRows(ongoingRecords || []);
+  const ongoingSummaryTotals = React.useMemo(() => {
+    const totals = {
+      region: 'Total',
+      total: 0,
+      issuanceOfWorkOrder: 0,
+      preFBIConference: 0,
+      conductOfFBI: 0,
+      reviewOfFBIReport: 0,
+      preFPICConference: 0,
+      firstCommunityAssembly: 0,
+      secondCommunityAssembly: 0,
+      consensusBuildingDecision: 0,
+      moaValidationRatificationSigning: 0,
+      issuanceResolutionOfConsent: 0,
+      reviewByRRT: 0,
+      reviewByADOorLAO: 0,
+      forComplianceOfFPICTeam: 0,
+      cebDeliberation: 0,
+    };
+    (ongoingSummaryRows || []).forEach((r) => {
+      totals.total += Number(r.total || 0);
+      totals.issuanceOfWorkOrder += Number(r.issuanceOfWorkOrder || 0);
+      totals.preFBIConference += Number(r.preFBIConference || 0);
+      totals.conductOfFBI += Number(r.conductOfFBI || 0);
+      totals.reviewOfFBIReport += Number(r.reviewOfFBIReport || 0);
+      totals.preFPICConference += Number(r.preFPICConference || 0);
+      totals.firstCommunityAssembly += Number(r.firstCommunityAssembly || 0);
+      totals.secondCommunityAssembly += Number(r.secondCommunityAssembly || 0);
+      totals.consensusBuildingDecision += Number(r.consensusBuildingDecision || 0);
+      totals.moaValidationRatificationSigning += Number(r.moaValidationRatificationSigning || 0);
+      totals.issuanceResolutionOfConsent += Number(r.issuanceResolutionOfConsent || 0);
+      totals.reviewByRRT += Number(r.reviewByRRT || 0);
+      totals.reviewByADOorLAO += Number(r.reviewByADOorLAO || 0);
+      totals.forComplianceOfFPICTeam += Number(r.forComplianceOfFPICTeam || 0);
+      totals.cebDeliberation += Number(r.cebDeliberation || 0);
+    });
+    return totals;
+  }, [ongoingSummaryRows]);
 
   // Filter ongoing records according to the active ongoing subtab (region tabs)
   const filteredOngoingRecords = React.useMemo(() => {
@@ -686,19 +801,21 @@ export function Dashboard({
     if (unfilteredTabs.includes(id)) return ongoingRecords;
 
     // Handle CAR explicitly
-    if (id === 'car') {
+      if (id === 'car') {
       return ongoingRecords.filter((rec) => {
-        const d = detectRegionSheet(rec.region);
+        const candidate = deriveRawRegion(rec) || rec.region || '';
+        const d = detectRegionSheet(candidate);
         if (d === 'CAR') return true;
-        const v = String(rec.region || '').toUpperCase();
+        const v = String(candidate || '').toUpperCase();
         return v.includes('CORDILLERA') || v.includes('CAR');
       });
     }
 
     // Handle combined region 6/7
-    if (id === 'region6-7') {
+      if (id === 'region6-7') {
       return ongoingRecords.filter((rec) => {
-        const d = detectRegionSheet(rec.region);
+        const candidate = deriveRawRegion(rec) || rec.region || '';
+        const d = detectRegionSheet(candidate);
         return d === 'Region VI' || d === 'Region VII';
       });
     }
@@ -711,15 +828,14 @@ export function Dashboard({
       const romanMap = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII'];
       const label = (n === 4 && suffix) ? `Region IV-${suffix}` : `Region ${romanMap[n - 1]}`;
       return ongoingRecords.filter((rec) => {
-        // Prefer an explicit canonical region from top-level `region`,
-        // then fall back to nested `ongoing.region` if present.
-        const candidate = rec && (rec.region || (rec.ongoing && rec.ongoing.region) || '');
+        // Prefer an explicit canonical region from top-level, nested `ongoing`, or raw_fields.
+        const candidate = deriveRawRegion(rec) || '';
         const recCanon = canonicalRegion(candidate) || '';
         if (recCanon === label) return true;
         // If canonicalization didn't yield a clear label, fall back to
         // detecting via detectRegionSheet on either field.
-        const dTop = detectRegionSheet(rec.region);
-        const dOngoing = rec && rec.ongoing ? detectRegionSheet(rec.ongoing.region) : null;
+        const dTop = detectRegionSheet(rec.region || candidate);
+        const dOngoing = rec && rec.ongoing ? detectRegionSheet(rec.ongoing.region || candidate) : null;
         if (dTop === label || dOngoing === label) return true;
         // As a last resort, attempt to match numeric tokens exactly from raw text
         const raw = String(candidate || '').toUpperCase();
@@ -2967,26 +3083,46 @@ export function Dashboard({
                               <td colSpan={16} className="px-4 sm:px-6 py-6 text-center text-[#0A2D55]/60">No ongoing items yet.</td>
                             </tr>
                           ) : (
-                            ongoingSummaryRows.map((r, idx) => (
-                              <tr key={r.region || idx} className="border-b border-[#0A2D55]/10">
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.region}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal font-semibold">{r.total}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.issuanceOfWorkOrder}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.preFBIConference}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.conductOfFBI}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.reviewOfFBIReport}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.preFPICConference}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.firstCommunityAssembly}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.secondCommunityAssembly}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.consensusBuildingDecision}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.moaValidationRatificationSigning}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.issuanceResolutionOfConsent}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.reviewByRRT}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.reviewByADOorLAO}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.forComplianceOfFPICTeam}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.cebDeliberation}</td>
+                            <>
+                              {ongoingSummaryRows.map((r, idx) => (
+                                <tr key={r.region || idx} className="border-b border-[#0A2D55]/10">
+                                  <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.region}</td>
+                                  <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal font-semibold">{r.total}</td>
+                                  <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.issuanceOfWorkOrder}</td>
+                                  <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.preFBIConference}</td>
+                                  <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.conductOfFBI}</td>
+                                  <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.reviewOfFBIReport}</td>
+                                  <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.preFPICConference}</td>
+                                  <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.firstCommunityAssembly}</td>
+                                  <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.secondCommunityAssembly}</td>
+                                  <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.consensusBuildingDecision}</td>
+                                  <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.moaValidationRatificationSigning}</td>
+                                  <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.issuanceResolutionOfConsent}</td>
+                                  <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.reviewByRRT}</td>
+                                  <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.reviewByADOorLAO}</td>
+                                  <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.forComplianceOfFPICTeam}</td>
+                                  <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.cebDeliberation}</td>
+                                </tr>
+                              ))}
+                              <tr key="_totals" className="border-t border-[#0A2D55]/10 font-semibold bg-[#F8FAFB]">
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/90 whitespace-normal">Total</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/90 whitespace-normal">{ongoingSummaryTotals.total}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/90 whitespace-normal">{ongoingSummaryTotals.issuanceOfWorkOrder}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/90 whitespace-normal">{ongoingSummaryTotals.preFBIConference}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/90 whitespace-normal">{ongoingSummaryTotals.conductOfFBI}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/90 whitespace-normal">{ongoingSummaryTotals.reviewOfFBIReport}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/90 whitespace-normal">{ongoingSummaryTotals.preFPICConference}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/90 whitespace-normal">{ongoingSummaryTotals.firstCommunityAssembly}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/90 whitespace-normal">{ongoingSummaryTotals.secondCommunityAssembly}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/90 whitespace-normal">{ongoingSummaryTotals.consensusBuildingDecision}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/90 whitespace-normal">{ongoingSummaryTotals.moaValidationRatificationSigning}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/90 whitespace-normal">{ongoingSummaryTotals.issuanceResolutionOfConsent}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/90 whitespace-normal">{ongoingSummaryTotals.reviewByRRT}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/90 whitespace-normal">{ongoingSummaryTotals.reviewByADOorLAO}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/90 whitespace-normal">{ongoingSummaryTotals.forComplianceOfFPICTeam}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/90 whitespace-normal">{ongoingSummaryTotals.cebDeliberation}</td>
                               </tr>
-                            ))
+                            </>
                           )}
                         </tbody>
                       </table>
@@ -3078,12 +3214,25 @@ export function Dashboard({
             let preRegion = null;
             if (activeTab === 'ongoing') {
               const id = String(ongoingSubTab || '').toLowerCase();
-              const m = id.match(/^region(\d{1,2})$/);
               if (id === 'car') preRegion = 'CAR';
-              else if (m) {
-                const n = Number(m[1]);
-                const romanMap = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII'];
-                preRegion = `Region ${romanMap[n - 1]}`;
+              else {
+                // Match either single region (e.g. region4a) or combined like region6-7
+                const m = id.match(/^region(\d{1,2})([abAB])?$/);
+                if (m) {
+                  const n = Number(m[1]);
+                  const suffix = m[2] ? String(m[2]).toUpperCase() : null;
+                  const romanMap = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII'];
+                  if (n === 4 && suffix) preRegion = `Region IV-${suffix}`;
+                  else preRegion = `Region ${romanMap[n - 1]}`;
+                } else {
+                  // Combined range like region6-7 -> prefill to first region (Region VI)
+                  const r = id.match(/^region(\d{1,2})-(\d{1,2})$/);
+                  if (r) {
+                    const n1 = Number(r[1]);
+                    const romanMap = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII'];
+                    if (n1 >= 1 && n1 <= 13) preRegion = `Region ${romanMap[n1 - 1]}`;
+                  }
+                }
               }
             }
             onAddMapping({ ongoing: activeTab === 'ongoing', region: preRegion });
