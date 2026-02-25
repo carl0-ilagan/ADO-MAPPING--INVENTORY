@@ -797,13 +797,38 @@ export function Dashboard({
   const filteredOngoingRecords = React.useMemo(() => {
     if (!Array.isArray(ongoingRecords)) return [];
     const id = String(ongoingSubTab || '').toLowerCase();
-    // Keep summary and other global views unfiltered
     const unfilteredTabs = ['summary', 'summary-per-project', 'denied-by-mgb', 'inactive'];
-    if (unfilteredTabs.includes(id)) return ongoingRecords;
+
+    // Apply search / region / remarks filtering first (same rules as main list)
+    const query = String(searchQuery || '').toLowerCase();
+    const prefiltered = ongoingRecords.filter((mapping) => {
+      if (!mapping) return false;
+      if (regionFilter !== 'all') {
+        const canon = canonicalRegion(mapping.region || '');
+        if (canon !== regionFilter) return false;
+      }
+      if (remarksFilter === 'with' && String(mapping.remarks || '').trim() === '') return false;
+      if (remarksFilter === 'none' && String(mapping.remarks || '').trim() !== '') return false;
+      if (!query) return true;
+      return (
+        String(mapping.surveyNumber || '').toLowerCase().includes(query) ||
+        String(mapping.region || '').toLowerCase().includes(query) ||
+        String(mapping.province || '').toLowerCase().includes(query) ||
+        String(mapping.municipality || '').toLowerCase().includes(query) ||
+        (Array.isArray(mapping.municipalities) && mapping.municipalities.join(', ').toLowerCase().includes(query)) ||
+        (Array.isArray(mapping.barangays) && mapping.barangays.join(', ').toLowerCase().includes(query)) ||
+        (Array.isArray(mapping.icc) && mapping.icc.join(', ').toLowerCase().includes(query)) ||
+        String(mapping.remarks || '').toLowerCase().includes(query) ||
+        String(mapping.proponent || mapping.applicant || mapping.applicantProponent || mapping.nameOfProject || mapping.projectName || '').toLowerCase().includes(query)
+      );
+    });
+
+    // If tab is unfiltered global view, return prefiltered list
+    if (unfilteredTabs.includes(id)) return prefiltered;
 
     // Handle CAR explicitly
-      if (id === 'car') {
-      return ongoingRecords.filter((rec) => {
+    if (id === 'car') {
+      return prefiltered.filter((rec) => {
         const candidate = deriveRawRegion(rec) || rec.region || '';
         const d = detectRegionSheet(candidate);
         if (d === 'CAR') return true;
@@ -813,8 +838,8 @@ export function Dashboard({
     }
 
     // Handle combined region 6/7
-      if (id === 'region6-7') {
-      return ongoingRecords.filter((rec) => {
+    if (id === 'region6-7') {
+      return prefiltered.filter((rec) => {
         const candidate = deriveRawRegion(rec) || rec.region || '';
         const d = detectRegionSheet(candidate);
         return d === 'Region VI' || d === 'Region VII';
@@ -828,39 +853,32 @@ export function Dashboard({
       const suffix = m[2] ? String(m[2]).toUpperCase() : null;
       const romanMap = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII'];
       const label = (n === 4 && suffix) ? `Region IV-${suffix}` : `Region ${romanMap[n - 1]}`;
-      return ongoingRecords.filter((rec) => {
-        // Prefer an explicit canonical region from top-level, nested `ongoing`, or raw_fields.
+      return prefiltered.filter((rec) => {
         const candidate = deriveRawRegion(rec) || '';
         const recCanon = canonicalRegion(candidate) || '';
         if (recCanon === label) return true;
-        // If canonicalization didn't yield a clear label, fall back to
-        // detecting via detectRegionSheet on either field.
         const dTop = detectRegionSheet(rec.region || candidate);
         const dOngoing = rec && rec.ongoing ? detectRegionSheet(rec.ongoing.region || candidate) : null;
         if (dTop === label || dOngoing === label) return true;
-        // As a last resort, attempt to match numeric tokens exactly from raw text
         const raw = String(candidate || '').toUpperCase();
         if (!raw) return false;
-        // Match the full label as a whole word to avoid collisions like
-        // 'Region I' matching inside 'Region IV-A'. Escape the label first.
         try {
           const labelUpper = label.toUpperCase();
-          const esc = labelUpper.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+          const esc = labelUpper.replace(/[\\^$.*+?()\[\]{}|]/g, '\\$&');
           const re = new RegExp(`\\b${esc}\\b`);
           if (re.test(raw)) return true;
         } catch (e) {
-          // fallback to strict equality
           if (raw === label.toUpperCase()) return true;
         }
-        const numMatch = raw.match(/\b(\d{1,2})(?:\s*[-–]?\s*[ABab])?\b/);
+        const numMatch = raw.match(/\\b(\\d{1,2})(?:\\s*[-–]?\\s*[ABab])?\\b/);
         if (numMatch) return Number(numMatch[1]) === n;
         return false;
       });
     }
 
-    // Fallback: return all
-    return ongoingRecords;
-  }, [ongoingRecords, ongoingSubTab]);
+    // Fallback: return prefiltered
+    return prefiltered;
+  }, [ongoingRecords, ongoingSubTab, searchQuery, regionFilter, remarksFilter]);
 
   // Helper: return a single-line compact header (truncate if too long)
   const compactHeaderDisplay = (text) => {
@@ -1356,7 +1374,8 @@ export function Dashboard({
       mapping.municipalities?.join(', ').toLowerCase().includes(query) ||
       mapping.barangays?.join(', ').toLowerCase().includes(query) ||
       mapping.icc?.join(', ').toLowerCase().includes(query) ||
-      mapping.remarks?.toLowerCase().includes(query)
+      mapping.remarks?.toLowerCase().includes(query) ||
+      String(mapping.proponent || mapping.applicant || mapping.applicantProponent || mapping.nameOfProject || mapping.projectName || '').toLowerCase().includes(query)
     );
   });
 
@@ -2748,7 +2767,7 @@ export function Dashboard({
                     type="text"
                     value={searchQuery}
                     onChange={(e) => handleSearch(e.target.value)}
-                    placeholder="Search survey number, location, ICC..."
+                    placeholder="Search survey number, proponent, location, ICC..."
                     className="flex-1 bg-transparent border-none outline-none text-sm text-[#0A2D55] placeholder-[#0A2D55]/50 min-w-0"
                   />
                   {searchQuery && (
@@ -3067,6 +3086,26 @@ export function Dashboard({
             <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 animate-header">
               <div className="flex items-center gap-3">
                 <h2 className="text-lg sm:text-2xl font-bold text-[#0A2D55]">Ongoing</h2>
+              </div>
+              <div className="w-full sm:w-auto flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                <div className="w-full sm:w-[320px] flex items-center gap-2 bg-white border-2 border-[#0A2D55]/10 rounded-xl px-4 py-2.5 hover:border-[#F2C94C]/40 focus-within:border-[#F2C94C] focus-within:ring-2 focus-within:ring-[#F2C94C]/40 transition-all shadow-sm hover:shadow-md">
+                  <Search size={18} className="text-[#0A2D55]/40 flex-shrink-0" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => handleSearch(e.target.value)}
+                    placeholder="Search survey number, proponent, location, ICC..."
+                    className="flex-1 bg-transparent border-none outline-none text-sm text-[#0A2D55] placeholder-[#0A2D55]/50 min-w-0"
+                  />
+                  {searchQuery && (
+                    <button
+                      onClick={() => handleSearch('')}
+                      className="text-[#0A2D55]/50 hover:text-[#0A2D55] transition flex-shrink-0"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
             {isInventoryUser ? (
