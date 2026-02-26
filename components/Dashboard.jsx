@@ -1,52 +1,50 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import * as XLSX from 'xlsx-js-style';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
-  Plus,
-  Search,
-  Download,
-  Upload,
-  Map as MapIcon,
-  MapPin,
-  Layers,
+  buildFirestoreDocument,
+  isValidRow,
+  mapHeadersToFields,
+} from '@/lib/firestoreSchema';
+import { cn } from '@/lib/utils';
+import {
   BarChart3,
-  User,
-  Eye,
-  Pencil,
-  Trash2,
   Bell,
   CheckCircle2,
   Clock,
+  Download,
+  Eye,
+  Map as MapIcon,
+  MapPin,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  Upload,
+  User
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import {
-  mapHeadersToFields,
-  buildFirestoreDocument,
-  isValidRow,
-} from '@/lib/firestoreSchema';
-import { updateMapping as updateMappingClient, updateDocumentInCollection } from '@/lib/firebaseDB.js';
+import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import * as XLSX from 'xlsx-js-style';
 
-export function Dashboard({
+function Dashboard({
   user,
   onLogout,
   onAddMapping,
   onViewMappings,
   onViewProfile,
-  onViewMapping = () => {},
-  onEditMapping = () => {},
-  onDeleteMapping = () => {},
+  onViewMapping = () => { },
+  onEditMapping = () => { },
+  onDeleteMapping = () => { },
   externalAlert = null,
   externalAlertTick = 0,
-  onClearExternalAlert = () => {},
+  onClearExternalAlert = () => { },
   mappings = [],
-  onImportMappings = () => {},
-  onPreviewImport = () => {},
+  onImportMappings = () => { },
+  onPreviewImport = () => { },
   availableCollections = [{ id: 'mappings', collectionName: 'mappings' }],
   selectedCollection = 'mappings',
-  onSelectCollection = () => {},
+  onSelectCollection = () => { },
   mainMappings = undefined,
   treatStatusAsOngoing = false,
 }) {
@@ -62,7 +60,7 @@ export function Dashboard({
   const [ongoingSubTab, setOngoingSubTab] = useState('summary');
   const [pendingSubTab, setPendingSubTab] = useState('summary');
   const [approvedSubTab, setApprovedSubTab] = useState('car');
-  
+
   const [showViewModal, setShowViewModal] = useState(false);
   const [isClosingViewModal, setIsClosingViewModal] = useState(false);
   const [selectedMapping, setSelectedMapping] = useState(null);
@@ -85,7 +83,7 @@ export function Dashboard({
   const [importRawSheets, setImportRawSheets] = useState([]);
   const [importCollectionName, setImportCollectionName] = useState('');
   const [showInvalidDetails, setShowInvalidDetails] = useState(false);
-  
+
   const [isClearingOngoingFlags, setIsClearingOngoingFlags] = useState(false);
   const [isBatchTagging, setIsBatchTagging] = useState(false);
   const fileInputRef = useRef(null);
@@ -170,7 +168,7 @@ export function Dashboard({
     return null;
   };
 
-  
+
 
   // Return a canonical region label for UI grouping/display.
   // Uses detectRegionSheet() then falls back to a trimmed version of the input.
@@ -181,10 +179,10 @@ export function Dashboard({
     if (detected) return detected;
     // Normalize common short forms like '1' -> 'Region I', '4A' -> 'Region IV-A'
     const numMatch = raw.match(/^\s*(\d{1,2})(?:\s*[-–]?\s*([ABab]))?\s*$/);
-    if (numMatch) { 
+    if (numMatch) {
       const n = Number(numMatch[1]);
       const suffix = numMatch[2] ? numMatch[2].toUpperCase() : null;
-      const romanMap = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII'];
+      const romanMap = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII'];
       if (n >= 1 && n <= 13) {
         if (n === 4 && suffix) return `Region IV-${suffix}`;
         return `Region ${romanMap[n - 1]}`;
@@ -209,7 +207,7 @@ export function Dashboard({
             const v = m[k];
             if (v && String(v).trim() !== '') return String(v);
           }
-        } catch (e) {}
+        } catch (e) { }
       }
       // scan nested ongoing keys
       if (m.ongoing && typeof m.ongoing === 'object') {
@@ -220,7 +218,7 @@ export function Dashboard({
               const v = m.ongoing[k];
               if (v && String(v).trim() !== '') return String(v);
             }
-          } catch (e) {}
+          } catch (e) { }
         }
       }
     } catch (e) {
@@ -254,9 +252,9 @@ export function Dashboard({
     const items = Array.isArray(value)
       ? value
       : String(value)
-          .split(',')
-          .map((v) => v.trim())
-          .filter(Boolean);
+        .split(',')
+        .map((v) => v.trim())
+        .filter(Boolean);
     if (items.length <= 2) return items.join(', ');
     return `${items.slice(0, 2).join(', ')}...`;
   };
@@ -274,7 +272,7 @@ export function Dashboard({
         if (!ts) return null;
         if (typeof ts.toDate === 'function') return ts.toDate();
         if (typeof ts.seconds === 'number') return new Date(ts.seconds * 1000 + Math.floor((ts.nanoseconds || 0) / 1e6));
-      } catch (e) {}
+      } catch (e) { }
       return null;
     };
 
@@ -297,10 +295,6 @@ export function Dashboard({
       if (/^[A-Za-z0-9_-]{16,40}$/.test(s)) return '-';
       return s;
     }
-    if (typeof val === 'number') {
-      if (val === 0) return '-';
-      return String(val);
-    }
     if (typeof val === 'boolean') return String(val);
     if (typeof val === 'object') {
       // Firestore Timestamp object or similar
@@ -312,7 +306,7 @@ export function Dashboard({
       try {
         const s = JSON.stringify(val);
         if (s && s !== '{}' && s !== '[]') return s;
-      } catch (e) {}
+      } catch (e) { }
       return '-';
     }
     return '-';
@@ -391,7 +385,7 @@ export function Dashboard({
             const v = mapping.ongoing[k];
             if (v !== null && typeof v !== 'undefined' && String(v).trim() !== '') return String(v);
           }
-        } catch (e) {}
+        } catch (e) { }
         // try safe key in raw_fields (normalized during import)
         try {
           if (mapping && mapping.raw_fields && typeof mapping.raw_fields === 'object') {
@@ -399,7 +393,7 @@ export function Dashboard({
             const vv = mapping.raw_fields[k] || mapping.raw_fields[safe] || mapping.raw_fields[safe.toLowerCase()];
             if (vv !== null && typeof vv !== 'undefined' && String(vv).trim() !== '') return String(vv);
           }
-        } catch (e) {}
+        } catch (e) { }
       }
       return null;
     };
@@ -422,7 +416,7 @@ export function Dashboard({
     if (h.includes('applicant') || h.includes('proponent')) return displayValue(getBest(['proponent', 'applicantProponent', 'applicant_proponent', 'applicant', 'applicant_name', 'applicantName']));
     if (h.includes('name of project') || (h.includes('name') && !h.includes('region'))) return displayValue(getBest(['nameOfProject', 'name_of_project', 'projectName', 'project_name', 'name', 'title']));
     if (h.includes('nature')) return getField(['natureOfProject', 'nature_of_project', 'nature', 'projectNature']) || '-';
-    
+
     if (h.includes('cadt')) return displayValue(getBest(['cadtStatus', 'cadt_status', 'cadt']));
     if (h === 'icc' || h.includes('icc')) return displayValue(getBest(['icc', 'iccs', 'affectedICC', 'affected_icc', 'affected_iccs']));
     if (h === 'location') return displayValue(getBest(['location', 'province', 'provinceName', 'province_name', 'location_full']));
@@ -450,9 +444,9 @@ export function Dashboard({
     const items = Array.isArray(value)
       ? value
       : String(value)
-          .split(',')
-          .map((v) => v.trim())
-          .filter(Boolean);
+        .split(',')
+        .map((v) => v.trim())
+        .filter(Boolean);
     return items.join(', ');
   };
 
@@ -525,7 +519,7 @@ export function Dashboard({
     ] : [
       'Name of Proponent', 'Name of Project', 'Type of project', 'Project Location', 'Project Area (in hectares)', 'Affected Ancestral Domain/s', 'Affected ICCs/IPs', 'Date of Application', 'Review of Application Documents', 'Need for FBI?', 'Issuance of Work Order', 'Pre-FBI Conference', 'Approval/ Concurrence of WFP', 'Payment of FBI Fee', 'Conduct of FBI', 'Preparation of FBI Report', 'Review of FBI Report', 'Issuance of Work Order of FPIC Team', 'Pre-FPIC Conference', 'Approval of WFP', 'Payment of FPIC Fee', 'Posting of Notices', '1st Community Assembly', '2nd Community Assembly', 'Consensus Building & Decision Meeting', 'Proceed to MOA Negotiation?', '(If yes) Issuance of Resolution to proceed to MOA Negotiation', 'MOA Negotiation & Preparation', 'MOA Validation, Ratification & Signing', 'Issuance of Resolution of Consent', 'Submission of FPIC Report', 'Review of the FPIC Report by RRT', 'Review of the FPIC Report by ADO & LAO', 'For compliance of FPIC Team/ RO', 'CEB Deliberation', 'CEB Approved?', '(If yes) Preparation & Signing of CEB Resolution & CP', 'Release of CP to the Proponent', 'REMARKS'
     ],
-    keys: ['proponent','nameOfProject','typeOfProject','location','area','ancestral','iccs','dateOfApplication','reviewOfApplicationDocuments','needForFBI','issuanceOfWorkOrder','preFBIConference','approvalOfWFP','paymentOfFBIFee','conductOfFBI','preparationOfFBIReport','reviewOfFBIReport','issuanceOfWorkOrderOfFPICTeam','preFPICConference','approvalOfWFP','paymentOfFPICFee','postingOfNotices','firstCommunityAssembly','secondCommunityAssembly','consensusBuildingDecision','proceedToMOANegotiation','issuanceResolutionToProceedToMOA','moaNegotiationPreparation','moaValidationRatificationSigning','issuanceResolutionOfConsent','submissionOfFPICReport','reviewByRRT','reviewByADOorLAO','forComplianceOfFPICTeam','cebDeliberation','cebApproved','preparationSigningCEBResolutionCP','releaseOfCPToProponent','remarks']
+    keys: ['proponent', 'nameOfProject', 'typeOfProject', 'location', 'area', 'ancestral', 'iccs', 'dateOfApplication', 'reviewOfApplicationDocuments', 'needForFBI', 'issuanceOfWorkOrder', 'preFBIConference', 'approvalOfWFP', 'paymentOfFBIFee', 'conductOfFBI', 'preparationOfFBIReport', 'reviewOfFBIReport', 'issuanceOfWorkOrderOfFPICTeam', 'preFPICConference', 'approvalOfWFP', 'paymentOfFPICFee', 'postingOfNotices', 'firstCommunityAssembly', 'secondCommunityAssembly', 'consensusBuildingDecision', 'proceedToMOANegotiation', 'issuanceResolutionToProceedToMOA', 'moaNegotiationPreparation', 'moaValidationRatificationSigning', 'issuanceResolutionOfConsent', 'submissionOfFPICReport', 'reviewByRRT', 'reviewByADOorLAO', 'forComplianceOfFPICTeam', 'cebDeliberation', 'cebApproved', 'preparationSigningCEBResolutionCP', 'releaseOfCPToProponent', 'remarks']
   }));
 
   // Approved subtabs: only regions + extractive company lists as requested
@@ -593,7 +587,7 @@ export function Dashboard({
                 const v = m[k];
                 if (v && String(v).trim() !== '') { rawRegion = v; break; }
               }
-            } catch (e) {}
+            } catch (e) { }
           }
         }
         if (!rawRegion || String(rawRegion).trim() === '') {
@@ -606,7 +600,7 @@ export function Dashboard({
                   const v = m.ongoing[k];
                   if (v && String(v).trim() !== '') { rawRegion = v; break; }
                 }
-              } catch (e) {}
+              } catch (e) { }
             }
           }
         }
@@ -706,7 +700,7 @@ export function Dashboard({
         return null;
       };
 
-        
+
 
       const FIELD_ALIASES = {
         issuanceOfWorkOrder: ['issuanceOfWorkOrder', 'issuance of work order', 'issuance_of_work_order', 'issuanceworkorder', 'issuance_work_order'],
@@ -849,7 +843,7 @@ export function Dashboard({
     // compute totals per row
     rows.forEach((r) => {
       r.TOTAL = (
-        Number(r.CAR||0)+Number(r.I||0)+Number(r.II||0)+Number(r.III||0)+Number(r.IVA||0)+Number(r.IVB||0)+Number(r.V||0)+Number(r['VI/VII']||0)+Number(r.IX||0)+Number(r.X||0)+Number(r.XI||0)+Number(r.XII||0)+Number(r.XIII||0)
+        Number(r.CAR || 0) + Number(r.I || 0) + Number(r.II || 0) + Number(r.III || 0) + Number(r.IVA || 0) + Number(r.IVB || 0) + Number(r.V || 0) + Number(r['VI/VII'] || 0) + Number(r.IX || 0) + Number(r.X || 0) + Number(r.XI || 0) + Number(r.XII || 0) + Number(r.XIII || 0)
       );
     });
     return rows;
@@ -858,11 +852,12 @@ export function Dashboard({
   // Compute counts by project type for 'Summary per project'
   const computeProjectTypeSummaryRows = (records = []) => {
     const categories = [
-      'Mining/ Mineral processing project', 'Energy Project', 'Forest Management project', 'EPR', 'Research project',
+      'Government Projects', 'Mining/ Mineral processing project', 'Energy Project', 'Forest Management project', 'EPR', 'Research project',
       'Road projects', 'Sand and Gravel', 'Irrigation project', 'Livelihood Programs', 'Eco-Tourism Project',
       'FLGMA', 'Telecommunication', 'Carbon Trading', 'Tree Cutting project', 'Plantation/ Pearl project', 'Water System Project', 'Others'
     ];
-    const counts = categories.reduce((acc, c) => ({ ...acc, [c]: 0 }), {});
+    const totals = categories.reduce((acc, c) => ({ ...acc, [c]: 0 }), {});
+    const countsByRegion = {};
 
     const detectProjectCategory = (m) => {
       if (!m) return 'Others';
@@ -872,6 +867,7 @@ export function Dashboard({
       ];
       const text = String(candidates.find((c) => c) || '').toLowerCase();
       if (!text) return 'Others';
+      if (text.includes('government') || text.includes('govt') || text.includes('municipal') || text.includes('local government') || text.includes('national')) return 'Government Projects';
       if (text.includes('mining') || text.includes('mineral')) return 'Mining/ Mineral processing project';
       if (text.includes('energy') || text.includes('power')) return 'Energy Project';
       if (text.includes('forest')) return 'Forest Management project';
@@ -879,7 +875,7 @@ export function Dashboard({
       if (text.includes('research')) return 'Research project';
       if (text.includes('road')) return 'Road projects';
       if (text.includes('sand') || text.includes('gravel')) return 'Sand and Gravel';
-      if (text.includes('irrig') ) return 'Irrigation project';
+      if (text.includes('irrig')) return 'Irrigation project';
       if (text.includes('livelihood')) return 'Livelihood Programs';
       if (text.includes('eco') || text.includes('tourism')) return 'Eco-Tourism Project';
       if (text.includes('flgma')) return 'FLGMA';
@@ -893,12 +889,21 @@ export function Dashboard({
 
     (records || []).forEach((m) => {
       const cat = detectProjectCategory(m);
-      if (counts.hasOwnProperty(cat)) counts[cat] += 1;
-      else counts['Others'] += 1;
+      const regionRaw = m.region || deriveRawRegion(m) || 'Unknown';
+      const region = String(canonicalRegion(regionRaw) || regionRaw || 'Unknown');
+      if (!countsByRegion[region]) {
+        countsByRegion[region] = categories.reduce((acc, c) => ({ ...acc, [c]: 0 }), { TOTAL: 0 });
+      }
+      if (totals.hasOwnProperty(cat)) totals[cat] += 1;
+      else totals['Others'] += 1;
+
+      if (countsByRegion[region].hasOwnProperty(cat)) countsByRegion[region][cat] += 1;
+      else countsByRegion[region]['Others'] += 1;
+      countsByRegion[region].TOTAL = Object.keys(countsByRegion[region]).filter((k) => k !== 'TOTAL').reduce((s, k) => s + Number(countsByRegion[region][k] || 0), 0);
     });
 
-    counts.TOTAL = Object.keys(counts).filter((k) => k !== 'TOTAL').reduce((s, k) => s + Number(counts[k] || 0), 0);
-    return { categories, counts };
+    totals.TOTAL = Object.keys(totals).filter((k) => k !== 'TOTAL').reduce((s, k) => s + Number(totals[k] || 0), 0);
+    return { categories, countsByRegion, totals };
   };
 
   const tabsHeader = (
@@ -1045,7 +1050,7 @@ export function Dashboard({
     if (m) {
       const n = Number(m[1]);
       const suffix = m[2] ? String(m[2]).toUpperCase() : null;
-      const romanMap = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII'];
+      const romanMap = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII'];
       const label = (n === 4 && suffix) ? `Region IV-${suffix}` : `Region ${romanMap[n - 1]}`;
       return prefiltered.filter((rec) => {
         const candidate = deriveRawRegion(rec) || '';
@@ -1158,7 +1163,7 @@ export function Dashboard({
         try {
           if (m && m.raw_fields && typeof m.raw_fields === 'object') {
             const rf = m.raw_fields;
-            const candidateKeys = ['name_of_proponent','name of proponent','name_of_proponent','proponent','applicantproponent','applicant_proponent'];
+            const candidateKeys = ['name_of_proponent', 'name of proponent', 'name_of_proponent', 'proponent', 'applicantproponent', 'applicant_proponent'];
             for (const ck of candidateKeys) {
               if (!ck) continue;
               const safe = String(ck).trim().replace(/\s+/g, '_').replace(/[^A-Za-z0-9_]/g, '_').toLowerCase();
@@ -1325,16 +1330,16 @@ export function Dashboard({
         for (const orig of Object.keys(m || {})) {
           if (compactHeader(orig) === ck) return formatVal(m[orig]);
         }
-          // also check nested ongoing compacted keys
-          try {
-            if (m && m.ongoing && typeof m.ongoing === 'object') {
-              for (const orig of Object.keys(m.ongoing || {})) {
-                if (compactHeader(orig) === ck) return formatVal(m.ongoing[orig]);
-              }
+        // also check nested ongoing compacted keys
+        try {
+          if (m && m.ongoing && typeof m.ongoing === 'object') {
+            for (const orig of Object.keys(m.ongoing || {})) {
+              if (compactHeader(orig) === ck) return formatVal(m.ongoing[orig]);
             }
-          } catch (e) {
-            // ignore
           }
+        } catch (e) {
+          // ignore
+        }
       }
       return null;
     };
@@ -1361,7 +1366,7 @@ export function Dashboard({
         return seek(['totalArea', 'area', 'area_ha', 'projectArea']) || '-';
       }
       case 'ancestral': return seek(['affectedAncestralDomain', 'affected_ancestral_domain_s', 'affected_ancestral_domains', 'Affected Ancestral Domain/s', 'ancestralDomain', 'ancestral_domains']) || '-';
-      case 'iccs': return seek(['iccs','icc','affectedICC','affected_icc','Affected ICCs/IPs','affected_iccs','affected_iccs_ips','affected_iccs/ips','affectedIccsIps','affectedIccs','affected_icc_ips']) || '-';
+      case 'iccs': return seek(['iccs', 'icc', 'affectedICC', 'affected_icc', 'Affected ICCs/IPs', 'affected_iccs', 'affected_iccs_ips', 'affected_iccs/ips', 'affectedIccsIps', 'affectedIccs', 'affected_icc_ips']) || '-';
       case 'dateOfApplication': return seek(['dateOfApplication', 'date_of_application', 'date']) || '-';
       default: {
         // try direct, then normalized/compacted matches
@@ -1380,7 +1385,7 @@ export function Dashboard({
 
         // FINAL FALLBACK: return the first non-empty raw field value from the document
         // (exclude internal/meta fields) so the UI shows the actual CSV content.
-        const metaKeys = new Set(['id','_ongoing','importCollection','import_batch_id','import_batch','imported_at','source_sheet']);
+        const metaKeys = new Set(['id', '_ongoing', 'importCollection', 'import_batch_id', 'import_batch', 'imported_at', 'source_sheet']);
         for (const orig of Object.keys(m || {})) {
           if (metaKeys.has(orig)) continue;
           const fv = formatVal(m[orig]);
@@ -1393,14 +1398,14 @@ export function Dashboard({
         // Additional explicit fallbacks for common top-level variants not caught above
         try {
           if (key === 'location') {
-            const candidates = ['projectLocation','project_location','project location','location_full','locationFull'];
+            const candidates = ['projectLocation', 'project_location', 'project location', 'location_full', 'locationFull'];
             for (const c of candidates) {
               if (Object.prototype.hasOwnProperty.call(m, c) && m[c]) return formatVal(m[c]);
               if (m.ongoing && Object.prototype.hasOwnProperty.call(m.ongoing, c) && m.ongoing[c]) return formatVal(m.ongoing[c]);
             }
           }
           if (key === 'iccs') {
-            const candidates = ['affectedIccsIps','affected_iccs_ips','affected_iccs','affectedIccs','affected_icc_ips','affected_icc'];
+            const candidates = ['affectedIccsIps', 'affected_iccs_ips', 'affected_iccs', 'affectedIccs', 'affected_icc_ips', 'affected_icc'];
             const vals = [];
             for (const c of candidates) {
               if (Object.prototype.hasOwnProperty.call(m, c) && m[c]) vals.push(formatVal(m[c]));
@@ -1704,7 +1709,7 @@ export function Dashboard({
 
   const pendingSummaryRows = computeSummaryRows(filteredPendingRecords || []);
   const pendingYearSummaryRows = computeYearSummaryRows(filteredPendingRecords || []);
-  const { categories: pendingProjectCategories, counts: pendingProjectCounts } = computeProjectTypeSummaryRows(filteredPendingRecords || []);
+  const { categories: pendingProjectCategories, countsByRegion: pendingProjectCountsByRegion, totals: pendingProjectCounts } = computeProjectTypeSummaryRows(filteredPendingRecords || []);
   const pendingSummaryTotals = React.useMemo(() => {
     const totals = {
       region: 'Total',
@@ -1966,7 +1971,7 @@ export function Dashboard({
     // Try to extract numeral and optional suffix (A/B)
     const m = String(detected).match(/([IVXLCM]+)(?:\s*[-–]?\s*([AB]))?/i);
     const romanToNumber = (r) => {
-      const map = { I:1, II:2, III:3, IV:4, V:5, VI:6, VII:7, VIII:8, IX:9, X:10, XI:11, XII:12, XIII:13 };
+      const map = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8, IX: 9, X: 10, XI: 11, XII: 12, XIII: 13 };
       return map[String(r || '').toUpperCase()] || null;
     };
     if (m) {
@@ -1975,7 +1980,7 @@ export function Dashboard({
       const num = romanToNumber(roman);
       if (num) {
         const key = suffix ? `${num}${suffix}` : String(num);
-        const allowed = new Set(['1','2','3','4A','4B','5','6','7','8','9','10','11','12','13']);
+        const allowed = new Set(['1', '2', '3', '4A', '4B', '5', '6', '7', '8', '9', '10', '11', '12', '13']);
         return allowed.has(key);
       }
     }
@@ -1984,7 +1989,7 @@ export function Dashboard({
     const digits = String(regionValue).match(/(\d{1,2})/);
     if (digits) {
       const n = Number(digits[1]);
-      if (n >=1 && n <= 13) return true;
+      if (n >= 1 && n <= 13) return true;
     }
     return false;
   };
@@ -2071,8 +2076,8 @@ export function Dashboard({
 
         console.log(`🔍 Header detection - Best match: row ${bestIndex}, matches: ${bestMatches}, nonEmpty: ${bestNonEmpty}`);
         if (bestIndex >= 0 && bestIndex < 10) {
-          console.log(`🔍 Header row candidates (first 10 rows):`, allRows.slice(0, 10).map((r, i) => ({ 
-            row: i, 
+          console.log(`🔍 Header row candidates (first 10 rows):`, allRows.slice(0, 10).map((r, i) => ({
+            row: i,
             score: scoreHeaderRow(r),
             cells: r.slice(0, 5)
           })));
@@ -2108,7 +2113,7 @@ export function Dashboard({
 
         // Use schema-based field mapping (header tokens, not indexes)
         const fieldMap = mapHeadersToFields(headerRowOriginal);
-        
+
         // Require at least one core field to be mapped. If none are found,
         // attempt a safe fallback: build documents using the raw headers as keys
         // so differently-formatted sheets still produce previewable records.
@@ -2174,7 +2179,7 @@ export function Dashboard({
           fallbackRegion = '';
         }
         if (!fallbackRegion) fallbackRegion = (sheetName && sheetName.toLowerCase() !== 'sheet1') ? sheetName : '';
-        
+
         // Generate batch ID for this import
         const batchId = `batch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -2202,7 +2207,7 @@ export function Dashboard({
 
       const allRecords = [];
       const invalidSheets = [];
-      const skipSheets = new Set(['summary', 'summary per year']);
+      const skipSheets = new Set(['summary', 'summary per year', 'summary per project']);
       const dataSheets = wb.SheetNames.filter((sheetName) => {
         if (!sheetName) return false;
         const sn = String(sheetName || '').trim().toLowerCase();
@@ -2453,7 +2458,7 @@ export function Dashboard({
     }
   };
 
-  
+
 
   // Handle modal close with animation
   const handleCloseModal = () => {
@@ -2609,7 +2614,7 @@ export function Dashboard({
           </div>
         </div>
       )}
-      
+
 
       {/* Import Choice Modal */}
       {showImportChoiceModal && (
@@ -2663,7 +2668,7 @@ export function Dashboard({
                 <p className="text-sm mb-2">Do you want to <strong>add</strong> these records into the existing database or <strong>create a new set</strong>?</p>
                 <p className="text-xs text-white/70 mb-2">If your Excel file has a different format, choose Create new and review results first.</p>
 
-                
+
               </div>
 
               <div className="px-4 sm:px-6 py-3 border-t border-white/15 flex flex-col items-stretch gap-3 bg-white/5">
@@ -2692,16 +2697,16 @@ export function Dashboard({
                   </button>
                 </div>
 
-                    {(importPreparedDocs && importPreparedDocs.length) || importPreviewRecords.length > 0 && (
+                {(importPreparedDocs && importPreparedDocs.length) || importPreviewRecords.length > 0 && (
                   <div className="flex gap-3 w-full mt-3">
                     <button
                       type="button"
                       onClick={() => {
                         try {
                           // Switch to Ongoing tab and provide a lightweight preview display
-                              // of the imported records as ongoing items without persisting them.
-                              setActiveTab('ongoing');
-                              if (typeof onPreviewImport === 'function') onPreviewImport(importPreparedDocs.length ? importPreparedDocs : importPreviewRecords);
+                          // of the imported records as ongoing items without persisting them.
+                          setActiveTab('ongoing');
+                          if (typeof onPreviewImport === 'function') onPreviewImport(importPreparedDocs.length ? importPreparedDocs : importPreviewRecords);
                           setShowImportChoiceModal(false);
                         } catch (err) {
                           console.warn('Preview as ongoing failed', err);
@@ -2846,7 +2851,7 @@ export function Dashboard({
               </div>
 
               <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-                {Array.isArray(availableCollections) && availableCollections.length > 1 && activeTab !== 'ongoing' ? (
+                {Array.isArray(availableCollections) && availableCollections.length > 1 && activeTab !== 'ongoing' && activeTab !== 'overview' ? (
                   <div className="flex items-center gap-2 mr-2">
                     <label className="sr-only">Collection</label>
                     <Select
@@ -2894,7 +2899,7 @@ export function Dashboard({
                   <Upload size={16} className="sm:w-4.5 sm:h-4.5" />
                   Upload Excel
                 </button>
-                
+
                 {/* Clear All Records button removed */}
                 <input
                   ref={fileInputRef}
@@ -2921,56 +2926,56 @@ export function Dashboard({
                 setActiveTab('overview');
                 setMobileMenuOpen(false);
               }}
-              className={`flex-1 min-w-0 sm:flex-none px-3 sm:px-5 py-3 sm:py-3.5 font-medium text-xs sm:text-base border-b-2 transition whitespace-nowrap flex items-center justify-center gap-1.5 sm:gap-2 ${
-                activeTab === 'overview'
+              aria-label="Overview"
+              className={`flex-1 min-w-0 sm:flex-none px-3 sm:px-5 py-3 sm:py-3.5 font-medium text-xs sm:text-base border-b-2 transition whitespace-nowrap flex items-center justify-center gap-1.5 sm:gap-2 ${activeTab === 'overview'
                   ? 'border-[#F2C94C] text-[#0A2D55] bg-[#F2C94C]/10'
                   : 'border-transparent text-[#0A2D55]/70 hover:text-[#0A2D55] hover:bg-[#0A2D55]/5'
-              }`}
+                }`}
             >
               <BarChart3 size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-              <span>Overview</span>
+              <span className="hidden sm:inline">Overview</span>
             </button>
             <button
               onClick={() => {
                 setActiveTab('mappings');
                 setMobileMenuOpen(false);
               }}
-              className={`flex-1 min-w-0 sm:flex-none px-3 sm:px-5 py-3 sm:py-3.5 font-medium text-xs sm:text-base border-b-2 transition whitespace-nowrap flex items-center justify-center gap-1.5 sm:gap-2 ${
-                activeTab === 'mappings'
+              aria-label="Approved Large Scale"
+              className={`flex-1 min-w-0 sm:flex-none px-3 sm:px-5 py-3 sm:py-3.5 font-medium text-xs sm:text-base border-b-2 transition whitespace-nowrap flex items-center justify-center gap-1.5 sm:gap-2 ${activeTab === 'mappings'
                   ? 'border-[#F2C94C] text-[#0A2D55] bg-[#F2C94C]/10'
                   : 'border-transparent text-[#0A2D55]/70 hover:text-[#0A2D55] hover:bg-[#0A2D55]/5'
-              }`}
+                }`}
             >
               <MapIcon size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-              <span>Approved Large Scale</span>
+              <span className="hidden sm:inline">Approved Large Scale</span>
             </button>
             <button
               onClick={() => {
                 setActiveTab('ongoing');
                 setMobileMenuOpen(false);
               }}
-              className={`flex-1 min-w-0 sm:flex-none px-3 sm:px-5 py-3 sm:py-3.5 font-medium text-xs sm:text-base border-b-2 transition whitespace-nowrap flex items-center justify-center gap-1.5 sm:gap-2 ${
-                activeTab === 'ongoing'
+              aria-label="Ongoing Large Scale"
+              className={`flex-1 min-w-0 sm:flex-none px-3 sm:px-5 py-3 sm:py-3.5 font-medium text-xs sm:text-base border-b-2 transition whitespace-nowrap flex items-center justify-center gap-1.5 sm:gap-2 ${activeTab === 'ongoing'
                   ? 'border-[#F2C94C] text-[#0A2D55] bg-[#F2C94C]/10'
                   : 'border-transparent text-[#0A2D55]/70 hover:text-[#0A2D55] hover:bg-[#0A2D55]/5'
-              }`}
+                }`}
             >
               <Bell size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-              <span>Ongoing Large Scale</span>
+              <span className="hidden sm:inline">Ongoing Large Scale</span>
             </button>
             <button
               onClick={() => {
                 setActiveTab('pending');
                 setMobileMenuOpen(false);
               }}
-              className={`flex-1 min-w-0 sm:flex-none px-3 sm:px-5 py-3 sm:py-3.5 font-medium text-xs sm:text-base border-b-2 transition whitespace-nowrap flex items-center justify-center gap-1.5 sm:gap-2 ${
-                activeTab === 'pending'
+              aria-label="Pending"
+              className={`flex-1 min-w-0 sm:flex-none px-3 sm:px-5 py-3 sm:py-3.5 font-medium text-xs sm:text-base border-b-2 transition whitespace-nowrap flex items-center justify-center gap-1.5 sm:gap-2 ${activeTab === 'pending'
                   ? 'border-[#F2C94C] text-[#0A2D55] bg-[#F2C94C]/10'
                   : 'border-transparent text-[#0A2D55]/70 hover:text-[#0A2D55] hover:bg-[#0A2D55]/5'
-              }`}
+                }`}
             >
               <Clock size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-              <span>Pending</span>
+              <span className="hidden sm:inline">Pending</span>
             </button>
           </div>
         </nav>
@@ -2994,7 +2999,7 @@ export function Dashboard({
                 </div>
               </div>
 
-              
+
 
               <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-4 sm:p-6 border-l-4 border-[#0C3B6E] hover:shadow-xl transition animate-section-2">
                 <div className="flex items-start justify-between gap-3">
@@ -3031,7 +3036,7 @@ export function Dashboard({
                   </div>
                 </div>
               </div>
-              
+
               <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-4 sm:p-6 border-l-4 border-violet-600 hover:shadow-xl transition animate-section-2">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
@@ -3091,6 +3096,7 @@ export function Dashboard({
                 </div>
               </div>
             </div>
+            {/* debug banner removed */}
 
             <div ref={null} className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-6 overflow-x-auto">
               {/* Pending subtabs */}
@@ -3118,7 +3124,7 @@ export function Dashboard({
                     <table className="min-w-[1100px] w-full table-auto">
                       <thead className="bg-[#0A2D55]/5 border-b border-[#0A2D55]/15">
                         <tr>
-                            {[
+                          {[
                             'YEAR APPLIED', 'CAR', 'I', 'II', 'III', 'IVA', 'IVB', 'V', '6/7', 'IX', 'X', 'XI', 'XII', 'XIII', 'TOTAL'
                           ].map((h, i) => (
                             <th key={i} title={h} className="px-3 sm:px-4 py-2 text-left text-[11px] sm:text-[12px] font-semibold text-[#0A2D55] normal-case leading-snug whitespace-nowrap truncate max-w-[220px]">{h}</th>
@@ -3162,19 +3168,33 @@ export function Dashboard({
                     <table className="min-w-[1100px] w-full table-auto">
                       <thead className="bg-[#0A2D55]/5 border-b border-[#0A2D55]/15">
                         <tr>
-                          {[
-                            'Mining/ Mineral processing project','Energy Project','Forest Management project','EPR','Research project','Road projects','Sand and Gravel','Irrigation project','Livelihood Programs','Eco-Tourism Project','FLGMA','Telecommunication','Carbon Trading','Tree Cutting project','Plantation/ Pearl project','Water System Project','Others','TOTAL'
-                          ].map((h, i) => (
+                          <th className="px-3 sm:px-4 py-2 text-left text-[11px] sm:text-[12px] font-semibold text-[#0A2D55] normal-case leading-snug whitespace-nowrap truncate max-w-[220px]">REGION</th>
+                          {(pendingProjectCategories || []).map((h, i) => (
                             <th key={i} title={h} className="px-3 sm:px-4 py-2 text-left text-[11px] sm:text-[12px] font-semibold text-[#0A2D55] normal-case leading-snug whitespace-nowrap truncate max-w-[220px]">{h}</th>
                           ))}
+                          <th className="px-3 sm:px-4 py-2 text-left text-[11px] sm:text-[12px] font-semibold text-[#0A2D55] normal-case leading-snug whitespace-nowrap truncate max-w-[220px]">TOTAL</th>
                         </tr>
                       </thead>
                       <tbody>
-                        <tr>
-                          {pendingProjectCategories.map((cat, i) => (
-                            <td key={i} className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal font-semibold">{pendingProjectCounts[cat] || 0}</td>
+                        {(() => {
+                          const defaultRegions = ['CAR','Region I','Region II','Region III','Region IV-A','Region IV-B','Region V','Region VI','Region VII','Region IX','Region X','Region XI','Region XII','Region XIII'];
+                          const regionKeys = (Object.keys(pendingProjectCountsByRegion || {}).length ? Object.keys(pendingProjectCountsByRegion).sort() : defaultRegions);
+                          return regionKeys.map((region) => (
+                            <tr key={region} className="border-b border-[#0A2D55]/10">
+                              <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal font-semibold">{region}</td>
+                              {(pendingProjectCategories || []).map((cat, i) => (
+                                <td key={i} className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal font-semibold">{(pendingProjectCountsByRegion[region] && pendingProjectCountsByRegion[region][cat]) || 0}</td>
+                              ))}
+                              <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal font-semibold">{(pendingProjectCountsByRegion[region] && pendingProjectCountsByRegion[region].TOTAL) || 0}</td>
+                            </tr>
+                          ));
+                        })()}
+                        <tr className="font-semibold bg-[#0A2D55]/5">
+                          <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">Total</td>
+                          {(pendingProjectCategories || []).map((cat, i) => (
+                            <td key={i} className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{pendingProjectCounts[cat] || 0}</td>
                           ))}
-                          <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal font-semibold">{pendingProjectCounts.TOTAL || 0}</td>
+                          <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{pendingProjectCounts.TOTAL || 0}</td>
                         </tr>
                       </tbody>
                     </table>
@@ -3182,10 +3202,10 @@ export function Dashboard({
                 )}
                 {currentPendingTab.id !== 'summary' && currentPendingTab.id !== 'summary-per-project' && (
                   (() => {
-                    const regionTableTabs = ['car','region1','region2','region3','region4a','region4b','region5','region6-7','region9','region10','region11','region12','region13','road-projects'];
+                    const regionTableTabs = ['car', 'region1', 'region2', 'region3', 'region4a', 'region4b', 'region5', 'region6-7', 'region9', 'region10', 'region11', 'region12', 'region13', 'road-projects'];
                     if (regionTableTabs.includes(String(currentPendingTab.id || '').toLowerCase())) {
                       const PENDING_REGION_HEADERS = [
-                        'NO','REGION','DATE OF FILING OF CP APPLICATION','NAME OF PROPONENT','NAME OF PROJECT','Project Cost','LOCATION','Type of Project','AFFECTED AD/ICC/IP','(for CP with ongoing FPIC)','STATUS OF APPLICATION','STATUS'
+                        'NO', 'REGION', 'DATE OF FILING OF CP APPLICATION', 'NAME OF PROPONENT', 'NAME OF PROJECT', 'Project Cost', 'LOCATION', 'Type of Project', 'AFFECTED AD/ICC/IP', '(for CP with ongoing FPIC)', 'STATUS OF APPLICATION', 'STATUS'
                       ];
                       return (
                         <div className="overflow-x-auto">
@@ -3381,8 +3401,8 @@ export function Dashboard({
             </div>
 
             <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-6 overflow-x-auto">
-                  <div className="mb-3">
-                    <div className="-mx-3 px-3 py-2 overflow-x-auto scrollbar-thin">
+              <div className="mb-3">
+                <div className="-mx-3 px-3 py-2 overflow-x-auto scrollbar-thin">
                   <div className="flex items-center gap-3 min-w-max">
                     {APPROVED_SUBTABS.map((t) => (
                       <button
@@ -3643,7 +3663,7 @@ export function Dashboard({
                           )}
                         </tbody>
                       </table>
-                      
+
                     </div>
                   ) : (
                     <div className="overflow-x-auto">
@@ -3669,15 +3689,15 @@ export function Dashboard({
                                 ))}
                                 <td className="px-2.5 sm:px-3 py-2 text-[12px] text-[#0A2D55]/80 w-[110px] sticky right-0 bg-white shadow-[-6px_0_10px_rgba(7,26,44,0.06)]">
                                   <div className="flex items-center gap-1.5 justify-end">
-                                      {isActionableRegion(m.region) ? (
-                                        <>
-                                          <button type="button" onClick={() => handleViewMapping(m)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#0A2D55]/15 text-[#0A2D55] hover:bg-[#0A2D55]/5 transition" title="View" aria-label="View"><Eye size={15} /></button>
-                                          <button type="button" onClick={() => onEditMapping(m)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#F2C94C]/40 text-[#8B6F1C] hover:bg-[#F2C94C]/15 transition" title="Edit" aria-label="Edit"><Pencil size={15} /></button>
-                                          <button type="button" onClick={() => handleOpenDeleteModal(m)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-red-200 text-red-600 hover:bg-red-50 transition" title="Delete" aria-label="Delete"><Trash2 size={15} /></button>
-                                        </>
-                                      ) : (
-                                        <span className="text-xs text-[#0A2D55]/40">—</span>
-                                      )}
+                                    {isActionableRegion(m.region) ? (
+                                      <>
+                                        <button type="button" onClick={() => handleViewMapping(m)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#0A2D55]/15 text-[#0A2D55] hover:bg-[#0A2D55]/5 transition" title="View" aria-label="View"><Eye size={15} /></button>
+                                        <button type="button" onClick={() => onEditMapping(m)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#F2C94C]/40 text-[#8B6F1C] hover:bg-[#F2C94C]/15 transition" title="Edit" aria-label="Edit"><Pencil size={15} /></button>
+                                        <button type="button" onClick={() => handleOpenDeleteModal(m)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-red-200 text-red-600 hover:bg-red-50 transition" title="Delete" aria-label="Delete"><Trash2 size={15} /></button>
+                                      </>
+                                    ) : (
+                                      <span className="text-xs text-[#0A2D55]/40">—</span>
+                                    )}
                                   </div>
                                 </td>
                               </tr>
@@ -3685,7 +3705,7 @@ export function Dashboard({
                           )}
                         </tbody>
                       </table>
-                      
+
                     </div>
                   )}
                 </>
@@ -3707,91 +3727,91 @@ export function Dashboard({
       {/* Floating Action Button with Menu */}
       {(fabMounted && typeof document !== 'undefined' && document.body) ? createPortal(
         <div className="fixed z-50 bottom-20 sm:bottom-8 right-4" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
-        {/* Profile Button - Top */}
-        <button
-          onClick={() => {
-            onViewProfile();
-            setFabOpen(false);
-          }}
-          className={cn(
-            "absolute w-14 h-14 bg-[#0A2D55] hover:bg-[#0C3B6E] text-white rounded-full shadow-lg hover:shadow-xl transition-all duration-300 ease-out active:scale-95 flex items-center justify-center",
-            fabOpen
-              ? "opacity-100 bottom-20 right-0"
-              : "opacity-0 bottom-0 right-0 pointer-events-none"
-          )}
-          title="Profile"
-        >
-          <User size={24} strokeWidth={2.5} />
-        </button>
+          {/* Profile Button - Top */}
+          <button
+            onClick={() => {
+              onViewProfile();
+              setFabOpen(false);
+            }}
+            className={cn(
+              "absolute w-14 h-14 bg-[#0A2D55] hover:bg-[#0C3B6E] text-white rounded-full shadow-lg hover:shadow-xl transition-all duration-300 ease-out active:scale-95 flex items-center justify-center",
+              fabOpen
+                ? "opacity-100 bottom-20 right-0"
+                : "opacity-0 bottom-0 right-0 pointer-events-none"
+            )}
+            title="Profile"
+          >
+            <User size={24} strokeWidth={2.5} />
+          </button>
 
-        {/* Add Mapping Button - Directly Left */}
-        <button
-          onClick={() => {
-            // If we're on the Ongoing tab and a region subtab is active, pre-fill the region
-            let preRegion = null;
-            if (activeTab === 'ongoing') {
-              const id = String(ongoingSubTab || '').toLowerCase();
-              if (id === 'car') preRegion = 'CAR';
-              else {
-                // Match either single region (e.g. region4a) or combined like region6-7
-                const m = id.match(/^region(\d{1,2})([abAB])?$/);
-                if (m) {
-                  const n = Number(m[1]);
-                  const suffix = m[2] ? String(m[2]).toUpperCase() : null;
-                  const romanMap = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII'];
-                  if (n === 4 && suffix) preRegion = `Region IV-${suffix}`;
-                  else preRegion = `Region ${romanMap[n - 1]}`;
-                } else {
-                  // Combined range like region6-7 -> prefill to first region (Region VI)
-                  const r = id.match(/^region(\d{1,2})-(\d{1,2})$/);
-                  if (r) {
-                    const n1 = Number(r[1]);
-                    const romanMap = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII'];
-                    if (n1 >= 1 && n1 <= 13) preRegion = `Region ${romanMap[n1 - 1]}`;
+          {/* Add Mapping Button - Directly Left */}
+          <button
+            onClick={() => {
+              // If we're on the Ongoing tab and a region subtab is active, pre-fill the region
+              let preRegion = null;
+              if (activeTab === 'ongoing') {
+                const id = String(ongoingSubTab || '').toLowerCase();
+                if (id === 'car') preRegion = 'CAR';
+                else {
+                  // Match either single region (e.g. region4a) or combined like region6-7
+                  const m = id.match(/^region(\d{1,2})([abAB])?$/);
+                  if (m) {
+                    const n = Number(m[1]);
+                    const suffix = m[2] ? String(m[2]).toUpperCase() : null;
+                    const romanMap = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII'];
+                    if (n === 4 && suffix) preRegion = `Region IV-${suffix}`;
+                    else preRegion = `Region ${romanMap[n - 1]}`;
+                  } else {
+                    // Combined range like region6-7 -> prefill to first region (Region VI)
+                    const r = id.match(/^region(\d{1,2})-(\d{1,2})$/);
+                    if (r) {
+                      const n1 = Number(r[1]);
+                      const romanMap = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII'];
+                      if (n1 >= 1 && n1 <= 13) preRegion = `Region ${romanMap[n1 - 1]}`;
+                    }
                   }
                 }
               }
-            }
-            onAddMapping({ ongoing: activeTab === 'ongoing', region: preRegion });
-            setFabOpen(false);
-          }}
-          className={cn(
-            "absolute w-14 h-14 bg-white hover:bg-gray-100 text-[#0A2D55] rounded-full shadow-lg hover:shadow-xl transition-all duration-300 ease-out active:scale-95 flex items-center justify-center",
-            fabOpen
-              ? "opacity-100 bottom-0 right-20"
-              : "opacity-0 bottom-0 right-0 pointer-events-none"
-          )}
-          title="Add Mapping"
-        >
-          <Plus size={24} strokeWidth={2.5} />
-        </button>
+              onAddMapping({ ongoing: activeTab === 'ongoing', region: preRegion });
+              setFabOpen(false);
+            }}
+            className={cn(
+              "absolute w-14 h-14 bg-white hover:bg-gray-100 text-[#0A2D55] rounded-full shadow-lg hover:shadow-xl transition-all duration-300 ease-out active:scale-95 flex items-center justify-center",
+              fabOpen
+                ? "opacity-100 bottom-0 right-20"
+                : "opacity-0 bottom-0 right-0 pointer-events-none"
+            )}
+            title="Add Mapping"
+          >
+            <Plus size={24} strokeWidth={2.5} />
+          </button>
 
-        {/* Export Excel Button - Top Left (YELLOW) */}
-        <button
-          onClick={handleOpenExportModal}
-          className={cn(
-            "absolute w-14 h-14 bg-[#F2C94C] hover:bg-yellow-400 text-[#0A2D55] rounded-full shadow-lg hover:shadow-xl transition-all duration-300 ease-out active:scale-95 flex items-center justify-center",
-            fabOpen
-              ? "opacity-100 bottom-20 right-20"
-              : "opacity-0 bottom-0 right-0 pointer-events-none"
-          )}
-          title="Export to Excel"
-        >
-          <Download size={24} strokeWidth={2.5} />
-        </button>
+          {/* Export Excel Button - Top Left (YELLOW) */}
+          <button
+            onClick={handleOpenExportModal}
+            className={cn(
+              "absolute w-14 h-14 bg-[#F2C94C] hover:bg-yellow-400 text-[#0A2D55] rounded-full shadow-lg hover:shadow-xl transition-all duration-300 ease-out active:scale-95 flex items-center justify-center",
+              fabOpen
+                ? "opacity-100 bottom-20 right-20"
+                : "opacity-0 bottom-0 right-0 pointer-events-none"
+            )}
+            title="Export to Excel"
+          >
+            <Download size={24} strokeWidth={2.5} />
+          </button>
 
-        {/* Main FAB Button */}
-        <button
-          onClick={() => setFabOpen(!fabOpen)}
-          className="relative w-16 h-16 bg-[#0A2D55] hover:bg-[#0C3B6E] text-white rounded-full shadow-lg hover:shadow-xl transition-all active:scale-95 flex items-center justify-center z-50"
-          title="Menu"
-        >
-          <Plus
-            size={28}
-            strokeWidth={3}
-            className={`transition-transform duration-300 ${fabOpen ? 'rotate-45' : ''}`}
-          />
-        </button>
+          {/* Main FAB Button */}
+          <button
+            onClick={() => setFabOpen(!fabOpen)}
+            className="relative w-16 h-16 bg-[#0A2D55] hover:bg-[#0C3B6E] text-white rounded-full shadow-lg hover:shadow-xl transition-all active:scale-95 flex items-center justify-center z-50"
+            title="Menu"
+          >
+            <Plus
+              size={28}
+              strokeWidth={3}
+              className={`transition-transform duration-300 ${fabOpen ? 'rotate-45' : ''}`}
+            />
+          </button>
         </div>, document.body
       ) : null}
 
@@ -4074,7 +4094,7 @@ export function Dashboard({
                         <p className="text-xs font-semibold text-white/70">Nature of Project</p>
                         <p className="text-white mt-1">{displayValue(getOngoingField(selectedMapping, 'typeOfProject') || getOngoingField(selectedMapping, 'natureOfProject') || selectedMapping.natureOfProject)}</p>
                       </div>
-                      
+
                       <div>
                         <p className="text-xs font-semibold text-white/70">CADT Status</p>
                         <p className="text-white mt-1">{displayValue(getOngoingField(selectedMapping, 'cadtStatus') || getOngoingField(selectedMapping, 'cadt') || selectedMapping.cadtStatus)}</p>
@@ -4151,7 +4171,11 @@ export function Dashboard({
         </>
       )}
 
-      
+
     </div>
   );
 }
+
+// Provide both a named and default export so consumers can import either style
+export { Dashboard };
+export default Dashboard;

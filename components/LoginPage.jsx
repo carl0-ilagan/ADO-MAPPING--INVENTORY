@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { Bell, Eye, EyeOff, MapPin } from 'lucide-react';
+import { db } from '@/lib/firebase.js';
 import { signInUser } from '@/lib/firebaseAuth.js';
 import { doc, getDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase.js';
+import { Bell, Eye, EyeOff, MapPin } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 export function LoginPage({ onLogin }) {
   const [username, setUsername] = useState('');
@@ -27,7 +27,7 @@ export function LoginPage({ onLogin }) {
 
     try {
       const usernameInput = username.trim();
-      
+
       // Convert username to email if needed (support both formats)
       // Default to the NCIP inventory domain (ncip@inventory.gov.ph)
       let email = usernameInput;
@@ -35,34 +35,34 @@ export function LoginPage({ onLogin }) {
         // If user enters "ncip", convert to inventory email
         email = `${usernameInput}@inventory.gov.ph`;
       }
-      
+
       console.log('🔐 Attempting login with email:', email);
-      
+
       // Try Firebase authentication
       const user = await signInUser(email, password);
       console.log('✓ Login successful:', user.uid);
-      
+
       // Get user data from Firestore
       const userDoc = await getDoc(doc(db, 'users', user.uid));
       const userData = userDoc.exists() ? userDoc.data() : {};
-      
+
       setAlertTick((t) => t + 1);
       setAlert({ type: 'success', message: 'Login successful. Redirecting…' });
       await new Promise((r) => setTimeout(r, 450));
-      
+
       onLogin({
         uid: user.uid,
         email: user.email,
         role: userData.role || 'user',
         communityName: userData.communityName || ''
       });
-      
+
     } catch (error) {
       console.error('Login error:', error);
       setAlertTick((t) => t + 1);
-      
+
       let errorMessage = 'Invalid username or password.';
-      
+
       if (error?.code === 'auth/invalid-credential' || error?.code === 'auth/wrong-password') {
         errorMessage = 'Invalid username or password.';
       } else if (error?.code === 'auth/user-not-found') {
@@ -74,7 +74,7 @@ export function LoginPage({ onLogin }) {
       } else if (error?.message) {
         errorMessage = error.message;
       }
-      
+
       setAlert({ type: 'error', message: errorMessage });
     } finally {
       setIsLoading(false);
@@ -159,62 +159,62 @@ export function LoginPage({ onLogin }) {
             {/* Panel body */}
             <div className="p-6 sm:p-7">
               <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
-            {/* Username Field */}
-            <div>
-              <label htmlFor="username" className="block text-xs sm:text-sm font-semibold text-white/90 mb-2">
-                Username or Email
-              </label>
-              <input
-                id="username"
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="ncip or ncip@inventory.gov.ph"
-                className="w-full px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm border border-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/35 focus:border-[#F2C94C]/35 transition bg-white/10 text-white placeholder:text-white/60 backdrop-blur-md shadow-inner shadow-black/10"
-                autoComplete="username"
-                disabled={isLoading}
-                required
-              />
-            </div>
+                {/* Username Field */}
+                <div>
+                  <label htmlFor="username" className="block text-xs sm:text-sm font-semibold text-white/90 mb-2">
+                    Username or Email
+                  </label>
+                  <input
+                    id="username"
+                    type="text"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="ncip or ncip@inventory.gov.ph"
+                    className="w-full px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm border border-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/35 focus:border-[#F2C94C]/35 transition bg-white/10 text-white placeholder:text-white/60 backdrop-blur-md shadow-inner shadow-black/10"
+                    autoComplete="username"
+                    disabled={isLoading}
+                    required
+                  />
+                </div>
 
-            {/* Password Field */}
-            <div>
-              <label htmlFor="password" className="block text-xs sm:text-sm font-semibold text-white/90 mb-2">
-                Password
-              </label>
-              <div className="relative">
-                <input
-                  id="password"
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm border border-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/35 focus:border-[#F2C94C]/35 transition bg-white/10 text-white placeholder:text-white/60 backdrop-blur-md pr-11 shadow-inner shadow-black/10"
-                  autoComplete="current-password"
-                  disabled={isLoading}
-                  required
-                />
+                {/* Password Field */}
+                <div>
+                  <label htmlFor="password" className="block text-xs sm:text-sm font-semibold text-white/90 mb-2">
+                    Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="password"
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm border border-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/35 focus:border-[#F2C94C]/35 transition bg-white/10 text-white placeholder:text-white/60 backdrop-blur-md pr-11 shadow-inner shadow-black/10"
+                      autoComplete="current-password"
+                      disabled={isLoading}
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-white/70 hover:text-white transition active:scale-95 p-1 rounded-md hover:bg-white/10"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      disabled={isLoading}
+                    >
+                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Login Button */}
                 <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-white/70 hover:text-white transition active:scale-95 p-1 rounded-md hover:bg-white/10"
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  type="submit"
                   disabled={isLoading}
+                  className="w-full bg-gradient-to-r from-[#0B3A63] to-[#092E4F] hover:from-[#0A355D] hover:to-[#082642] active:scale-[0.99] text-white font-semibold py-3 sm:py-3 text-sm sm:text-base rounded-xl transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed mt-6 touch-manipulation shadow-lg shadow-black/30 ring-1 ring-white/10"
                 >
-                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  {isLoading ? 'Logging in...' : 'Login'}
                 </button>
-              </div>
-            </div>
-
-            {/* Login Button */}
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full bg-gradient-to-r from-[#0B3A63] to-[#092E4F] hover:from-[#0A355D] hover:to-[#082642] active:scale-[0.99] text-white font-semibold py-3 sm:py-3 text-sm sm:text-base rounded-xl transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed mt-6 touch-manipulation shadow-lg shadow-black/30 ring-1 ring-white/10"
-            >
-              {isLoading ? 'Logging in...' : 'Login'}
-            </button>
-          </form>
+              </form>
 
               {/* Footer */}
               <div className="mt-6 pt-4 border-t border-white/15 text-center text-[11px] sm:text-xs text-white/70">

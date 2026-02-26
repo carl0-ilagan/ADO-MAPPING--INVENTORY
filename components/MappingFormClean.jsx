@@ -76,7 +76,7 @@ async function fetchJson(url) {
   return res.json();
 }
 
-function SearchableSelect({ options = [], selected = null, onChange = () => {}, placeholder = "Select", multi = false, disabled = false, summaryLabels = { singular: "item", plural: "items" }, allowCustom = false, showSearch = true }) {
+function SearchableSelect({ options = [], selected = null, onChange = () => { }, placeholder = "Select", multi = false, disabled = false, summaryLabels = { singular: "item", plural: "items" }, allowCustom = false, showSearch = true }) {
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
   const [search, setSearch] = useState("");
@@ -133,7 +133,7 @@ function SearchableSelect({ options = [], selected = null, onChange = () => {}, 
   const handleCustomValue = () => {
     if (!allowCustom || !search.trim()) return;
     const trimmed = search.trim();
-    
+
     if (multi) {
       // For multi-select, add the custom value as a new item
       const next = new Set(Array.from(selected || []));
@@ -142,7 +142,7 @@ function SearchableSelect({ options = [], selected = null, onChange = () => {}, 
       setSearch("");
       return;
     }
-    
+
     // For single select
     // Check if it already exists in options
     const existing = options.find((o) => o.name.toLowerCase() === trimmed.toLowerCase());
@@ -201,18 +201,18 @@ function SearchableSelect({ options = [], selected = null, onChange = () => {}, 
         >
           {showSearch && (
             <div className="p-3 sticky top-0 bg-white border-b border-[#0A2D55]/10">
-              <input 
+              <input
                 ref={inputRef}
-                value={search} 
-                onChange={(e) => setSearch(e.target.value)} 
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && allowCustom && search.trim()) {
                     e.preventDefault();
                     handleCustomValue();
                   }
                 }}
-                placeholder={allowCustom ? "Search or type custom..." : "Search..."} 
-                className="w-full px-3 py-2 border-2 border-[#0A2D55]/10 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40" 
+                placeholder={allowCustom ? "Search or type custom..." : "Search..."}
+                className="w-full px-3 py-2 border-2 border-[#0A2D55]/10 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40"
               />
             </div>
           )}
@@ -247,8 +247,8 @@ function SearchableSelect({ options = [], selected = null, onChange = () => {}, 
 export default function MappingForm({
   isModal = false,
   user = null,
-  onBack = () => {},
-  onSubmit = () => {},
+  onBack = () => { },
+  onSubmit = () => { },
   initialData = null,
   ongoingMode = false,
   fixedRegion = null,
@@ -532,13 +532,13 @@ export default function MappingForm({
     setSelectedMunicipalityCodes(new Set(municipalityCodes));
     setSelectedBarangayCodes(new Set(barangayCodes));
     setSelectedIccIpCodes(new Set(Array.isArray(initialData.icc) ? initialData.icc : []));
-    
+
     // NCIP-specific fields
     setControlNumber(initialData.controlNumber || "");
     setApplicantProponent(initialData.applicantProponent || initialData.applicant || initialData.proponent || "");
     setNameOfProject(initialData.nameOfProject || initialData.projectName || "");
     setNatureOfProject(initialData.natureOfProject || initialData.nature || "");
-    
+
     setCadtStatus(initialData.cadtStatus || initialData.cadt || "");
     setLocation(initialData.location || "");
     setYearApproved(initialData.yearApproved || initialData.year || "");
@@ -558,10 +558,10 @@ export default function MappingForm({
         // Prefer nested ongoing values, then camel-case alias, then top-level keys, then raw_fields
         const val = (typeof srcOngoing[k] !== 'undefined' && srcOngoing[k] !== null && String(srcOngoing[k]).trim() !== '') ? srcOngoing[k]
           : (typeof srcOngoing[camel] !== 'undefined' && srcOngoing[camel] !== null && String(srcOngoing[camel]).trim() !== '') ? srcOngoing[camel]
-          : (typeof initialData[k] !== 'undefined' && initialData[k] !== null && String(initialData[k]).trim() !== '') ? initialData[k]
-          : (typeof initialData[l] !== 'undefined' && initialData[l] !== null && String(initialData[l]).trim() !== '') ? initialData[l]
-          : (typeof raw[k] !== 'undefined' && raw[k] !== null && String(raw[k]).trim() !== '') ? raw[k]
-          : '';
+            : (typeof initialData[k] !== 'undefined' && initialData[k] !== null && String(initialData[k]).trim() !== '') ? initialData[k]
+              : (typeof initialData[l] !== 'undefined' && initialData[l] !== null && String(initialData[l]).trim() !== '') ? initialData[l]
+                : (typeof raw[k] !== 'undefined' && raw[k] !== null && String(raw[k]).trim() !== '') ? raw[k]
+                  : '';
         // If this is the Date of Application field, normalize to yyyy-mm-dd for date input
         if (k === 'date_of_application') {
           od[k] = formatDateForInput(val);
@@ -573,7 +573,7 @@ export default function MappingForm({
     } catch (e) {
       // ignore
     }
-    
+
     setErrors({});
 
     setTimeout(() => setIsHydrating(false), 0);
@@ -646,7 +646,7 @@ export default function MappingForm({
 
   const validate = () => {
     const e = {};
-    
+
     // If we're in ongoingMode (adding from the Ongoing tab), allow saving
     // without the usual province/municipality/barangay requirements. The
     // ongoing workflow often collects a different set of fields.
@@ -667,7 +667,7 @@ export default function MappingForm({
       if (!selectedMunicipalityCodes || selectedMunicipalityCodes.size === 0) e.municipalities = "At least one municipality is required";
       if (!selectedBarangayCodes || selectedBarangayCodes.size === 0) e.barangays = "At least one barangay is required";
     }
-    
+
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -679,7 +679,7 @@ export default function MappingForm({
     setIsSaving(true);
 
     const regionName = fixedRegion || regionMap.get(String(selectedRegionCode)) || selectedRegionCode || "";
-    
+
     try {
       // Build a mapped ongoing payload: include sanitized keys and camelCase/common aliases
       const ongoingPayload = {};
@@ -695,7 +695,7 @@ export default function MappingForm({
           if (camel.includes('location')) ongoingPayload['location'] = v;
           if (camel.includes('remarks') || camel === 'remarks') ongoingPayload['remarks'] = v;
         });
-        
+
       }
       if (isInventoryUser) {
         // NCIP user submission
@@ -803,7 +803,7 @@ export default function MappingForm({
             </div>
           </div>
 
-            
+
         </div>
       )}
       <div className={isModal ? "w-full flex-1 flex flex-col min-h-0" : "max-w-4xl mx-auto px-4 sm:px-6"}>
@@ -820,7 +820,7 @@ export default function MappingForm({
                 <h1 className="font-bold text-xl text-[#0A2D55]">{formTitle}</h1>
                 <p className="text-sm text-[#0A2D55]/55 mt-1">Indigenous Cultural Community mapping record</p>
               </div>
-              
+
             </div>
           </div>
 
@@ -836,277 +836,277 @@ export default function MappingForm({
               </div>
             </div>
 
-            
+
           )}
 
           <form onSubmit={handleSave} className="flex-1 flex flex-col min-h-0">
             <div className="flex-1 overflow-y-auto overflow-x-hidden hide-scrollbar p-4 sm:p-7 pb-28 sm:pb-24">
               <div className="space-y-6">
-              {ongoingMode ? (
-                <>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {ONGOING_LABELS.map((label) => {
-                      const key = sanitizeKey(label);
-                      const isRemarks = String(label || '').toLowerCase().includes('remark') || label === 'REMARKS';
-                      const isDropdown = ONGOING_DROPDOWN_LABELS.has(label);
-                      return (
-                        <div key={key}>
-                          <label className="block font-semibold text-[#0A2D55] mb-2">{label}</label>
-                          {isRemarks ? (
-                            <textarea value={ongoingData[key] || ''} onChange={(e) => setOngoingData((s) => ({ ...s, [key]: e.target.value }))} rows={3} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
-                          ) : isDropdown ? (
-                            <SearchableSelect
-                              options={[{ code: 'Done', name: 'Done' }, { code: 'Pending', name: 'Pending' }]}
-                              selected={ongoingData[key] || ''}
-                              onChange={(v) => setOngoingData((s) => ({ ...s, [key]: v }))}
-                              placeholder="Select status"
-                              allowCustom={false}
-                              showSearch={false}
-                              disabled={false}
-                            />
-                          ) : (
-                            // If the field is Date of Application, render a date picker
-                            (key === 'date_of_application') ? (
-                              <input
-                                type="date"
-                                value={ongoingData[key] || ''}
-                                onChange={(e) => setOngoingData((s) => ({ ...s, [key]: e.target.value }))}
-                                className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition"
+                {ongoingMode ? (
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {ONGOING_LABELS.map((label) => {
+                        const key = sanitizeKey(label);
+                        const isRemarks = String(label || '').toLowerCase().includes('remark') || label === 'REMARKS';
+                        const isDropdown = ONGOING_DROPDOWN_LABELS.has(label);
+                        return (
+                          <div key={key}>
+                            <label className="block font-semibold text-[#0A2D55] mb-2">{label}</label>
+                            {isRemarks ? (
+                              <textarea value={ongoingData[key] || ''} onChange={(e) => setOngoingData((s) => ({ ...s, [key]: e.target.value }))} rows={3} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
+                            ) : isDropdown ? (
+                              <SearchableSelect
+                                options={[{ code: 'Done', name: 'Done' }, { code: 'Pending', name: 'Pending' }]}
+                                selected={ongoingData[key] || ''}
+                                onChange={(v) => setOngoingData((s) => ({ ...s, [key]: v }))}
+                                placeholder="Select status"
+                                allowCustom={false}
+                                showSearch={false}
+                                disabled={false}
                               />
                             ) : (
-                              <input value={ongoingData[key] || ''} onChange={(e) => setOngoingData((s) => ({ ...s, [key]: e.target.value }))} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
-                            )
+                              // If the field is Date of Application, render a date picker
+                              (key === 'date_of_application') ? (
+                                <input
+                                  type="date"
+                                  value={ongoingData[key] || ''}
+                                  onChange={(e) => setOngoingData((s) => ({ ...s, [key]: e.target.value }))}
+                                  className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition"
+                                />
+                              ) : (
+                                <input value={ongoingData[key] || ''} onChange={(e) => setOngoingData((s) => ({ ...s, [key]: e.target.value }))} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
+                              )
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                  </>
+                ) : (
+                  isInventoryUser ? (
+                    <>
+                      {/* NCIP Inventory User Form */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">No. (Survey Number)</label>
+                          <input value={surveyNumber} onChange={(e) => setSurveyNumber(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="e.g. ADO-2024-001" />
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">Region <span className="text-red-500">*</span></label>
+                          <SearchableSelect options={regions} selected={selectedRegionCode} onChange={(c) => setSelectedRegionCode(c)} placeholder="Select region" disabled={!!fixedRegion} />
+                          {errors.region && <p className="text-red-500 text-xs mt-1">{errors.region}</p>}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">Control Number <span className="text-red-500">*</span></label>
+                          <input value={controlNumber} onChange={(e) => setControlNumber(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="e.g. CADT-2024-001" />
+                          {errors.controlNumber && <p className="text-red-500 text-xs mt-1">{errors.controlNumber}</p>}
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">Proponent</label>
+                          <input value={applicantProponent} onChange={(e) => setApplicantProponent(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="Enter proponent name" />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">Name of Project</label>
+                          <input value={nameOfProject} onChange={(e) => setNameOfProject(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="Enter project name" />
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">Location</label>
+                          <input value={location} onChange={(e) => setLocation(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="Enter location" />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">Nature of Project</label>
+                          <input value={natureOfProject} onChange={(e) => setNatureOfProject(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="Enter project nature" />
+                        </div>
+
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">CADT Status</label>
+                          <SearchableSelect
+                            options={[{ code: 'Done', name: 'Done' }, { code: 'Pending', name: 'Pending' }]}
+                            selected={cadtStatus}
+                            onChange={(v) => setCadtStatus(v)}
+                            placeholder="Select CADT status"
+                            allowCustom={false}
+                            showSearch={false}
+                            disabled={false}
+                          />
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">Affected ICC</label>
+                          <SearchableSelect
+                            options={ICC_IP_OPTIONS.map((name) => ({ code: name, name }))}
+                            selected={selectedIccIpCodes}
+                            onChange={(s) => setSelectedIccIpCodes(s)}
+                            placeholder="Select affected ICC/IP"
+                            multi={true}
+                            summaryLabels={{ singular: "group", plural: "groups" }}
+                            allowCustom={true}
+                          />
+                          {selectedIccIpCodes.size > 0 && (
+                            <div className="flex flex-wrap gap-2 mt-2">
+                              {Array.from(selectedIccIpCodes).map((code) => (
+                                <span key={code} className="inline-flex items-center gap-1.5 bg-[#0C3B6E] text-white px-3 py-1.5 rounded-full text-xs">
+                                  {code}
+                                </span>
+                              ))}
+                            </div>
                           )}
                         </div>
-                      );
-                    })}
-                  </div>
-                  
-                </>
-              ) : (
-                isInventoryUser ? (
-                <>
-                  {/* NCIP Inventory User Form */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block font-semibold text-[#0A2D55] mb-2">No. (Survey Number)</label>
-                      <input value={surveyNumber} onChange={(e) => setSurveyNumber(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="e.g. ADO-2024-001" />
-                    </div>
-                    <div>
-                      <label className="block font-semibold text-[#0A2D55] mb-2">Region <span className="text-red-500">*</span></label>
-                      <SearchableSelect options={regions} selected={selectedRegionCode} onChange={(c) => setSelectedRegionCode(c)} placeholder="Select region" disabled={!!fixedRegion} />
-                      {errors.region && <p className="text-red-500 text-xs mt-1">{errors.region}</p>}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block font-semibold text-[#0A2D55] mb-2">Control Number <span className="text-red-500">*</span></label>
-                      <input value={controlNumber} onChange={(e) => setControlNumber(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="e.g. CADT-2024-001" />
-                      {errors.controlNumber && <p className="text-red-500 text-xs mt-1">{errors.controlNumber}</p>}
-                    </div>
-                    <div>
-                      <label className="block font-semibold text-[#0A2D55] mb-2">Proponent</label>
-                      <input value={applicantProponent} onChange={(e) => setApplicantProponent(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="Enter proponent name" />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block font-semibold text-[#0A2D55] mb-2">Name of Project</label>
-                      <input value={nameOfProject} onChange={(e) => setNameOfProject(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="Enter project name" />
-                    </div>
-                    <div>
-                      <label className="block font-semibold text-[#0A2D55] mb-2">Location</label>
-                      <input value={location} onChange={(e) => setLocation(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="Enter location" />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block font-semibold text-[#0A2D55] mb-2">Nature of Project</label>
-                      <input value={natureOfProject} onChange={(e) => setNatureOfProject(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="Enter project nature" />
-                    </div>
-                    
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block font-semibold text-[#0A2D55] mb-2">CADT Status</label>
-                      <SearchableSelect
-                        options={[{ code: 'Done', name: 'Done' }, { code: 'Pending', name: 'Pending' }]}
-                        selected={cadtStatus}
-                        onChange={(v) => setCadtStatus(v)}
-                        placeholder="Select CADT status"
-                        allowCustom={false}
-                        showSearch={false}
-                        disabled={false}
-                      />
-                    </div>
-                    <div>
-                      <label className="block font-semibold text-[#0A2D55] mb-2">Affected ICC</label>
-                      <SearchableSelect
-                        options={ICC_IP_OPTIONS.map((name) => ({ code: name, name }))}
-                        selected={selectedIccIpCodes}
-                        onChange={(s) => setSelectedIccIpCodes(s)}
-                        placeholder="Select affected ICC/IP"
-                        multi={true}
-                        summaryLabels={{ singular: "group", plural: "groups" }}
-                        allowCustom={true}
-                      />
-                      {selectedIccIpCodes.size > 0 && (
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          {Array.from(selectedIccIpCodes).map((code) => (
-                            <span key={code} className="inline-flex items-center gap-1.5 bg-[#0C3B6E] text-white px-3 py-1.5 rounded-full text-xs">
-                              {code}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block font-semibold text-[#0A2D55] mb-2">Year Approved</label>
-                      <input value={yearApproved} onChange={(e) => setYearApproved(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="e.g. 2024" />
-                    </div>
-                    <div>
-                      <label className="block font-semibold text-[#0A2D55] mb-2">MOA Duration</label>
-                      <input value={moaDuration} onChange={(e) => setMoaDuration(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="e.g. 25 years" />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-[#0A2D55] mb-2">Community Benefits</label>
-                    <textarea value={communityBenefits} onChange={(e) => setCommunityBenefits(e.target.value)} rows={3} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="Describe community benefits" />
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-[#0A2D55] mb-2">Remarks</label>
-                    <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
-                  </div>
-                </>
-                ) : (
-                <>
-                  {/* Regular User Form */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block font-semibold text-[#0A2D55] mb-2">Survey Number <span className="text-red-500">*</span></label>
-                      <input value={surveyNumber} onChange={(e) => setSurveyNumber(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="e.g. ADO-2024-001" />
-                      {errors.surveyNumber && <p className="text-red-500 text-xs mt-1">{errors.surveyNumber}</p>}
-                    </div>
-                    <div>
-                      <label className="block font-semibold text-[#0A2D55] mb-2">Total Area (hectares)</label>
-                      <input 
-                        value={totalArea} 
-                        onChange={(e) => handleTotalAreaChange(e.target.value)} 
-                        className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" 
-                        placeholder="e.g. 1,234.56" 
-                        type="text"
-                      />
-                      {totalArea && (
-                        <p className="text-xs text-[#0A2D55]/60 mt-1">
-                          {parseTotalArea(totalArea).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ha
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-[#0A2D55] mb-2">ICC/IP Community</label>
-                    <SearchableSelect
-                      options={ICC_IP_OPTIONS.map((name) => ({ code: name, name }))}
-                      selected={selectedIccIpCodes}
-                      onChange={(s) => setSelectedIccIpCodes(s)}
-                      placeholder="Select ICC/IP"
-                      multi={true}
-                      summaryLabels={{ singular: "group", plural: "groups" }}
-                      allowCustom={true}
-                    />
-                    {selectedIccIpCodes.size > 0 && (
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {Array.from(selectedIccIpCodes).map((code) => (
-                          <span key={code} className="inline-flex items-center gap-1.5 bg-[#0C3B6E] text-white px-3 py-1.5 rounded-full text-xs">
-                            {code}
-                          </span>
-                        ))}
                       </div>
-                    )}
-                  </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block font-semibold text-[#0A2D55] mb-2">Region <span className="text-red-500">*</span></label>
-                      <SearchableSelect options={regions} selected={selectedRegionCode} onChange={(c) => setSelectedRegionCode(c)} placeholder="Select region" disabled={!!fixedRegion} />
-                      {errors.region && <p className="text-red-500 text-xs mt-1">{errors.region}</p>}
-                    </div>
-                    <div>
-                      <label className="block font-semibold text-[#0A2D55] mb-2">Province <span className="text-red-500">*</span></label>
-                      <SearchableSelect 
-                        options={provinces.map((p) => ({ code: p.code, name: p.name }))} 
-                        selected={selectedProvinceCode} 
-                        onChange={(c) => setSelectedProvinceCode(c)} 
-                        placeholder="Select or type province" 
-                        disabled={!selectedRegionCode}
-                        allowCustom={true}
-                      />
-                      {errors.province && <p className="text-red-500 text-xs mt-1">{errors.province}</p>}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block font-semibold text-[#0A2D55] mb-2">Municipalities <span className="text-red-500">*</span></label>
-                      <SearchableSelect 
-                        options={municipalities.map((m) => ({ code: m.code, name: m.name }))} 
-                        selected={selectedMunicipalityCodes} 
-                        onChange={(s) => setSelectedMunicipalityCodes(s)} 
-                        placeholder="Select or type municipalities" 
-                        multi={true} 
-                        disabled={!selectedProvinceCode} 
-                        summaryLabels={{ singular: "municipality", plural: "municipalities" }}
-                        allowCustom={true}
-                      />
-                      {errors.municipalities && <p className="text-red-500 text-xs mt-1">{errors.municipalities}</p>}
-                      {selectedMunicipalityCodes.size > 0 && (
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          {Array.from(selectedMunicipalityCodes).map((code) => (
-                            <span key={code} className="inline-flex items-center gap-1.5 bg-[#0A2D55]/10 text-[#0A2D55] px-3 py-1.5 rounded-full text-xs">{municipalityMap.get(String(code)) || code}</span>
-                          ))}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">Year Approved</label>
+                          <input value={yearApproved} onChange={(e) => setYearApproved(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="e.g. 2024" />
                         </div>
-                      )}
-                    </div>
-                    <div>
-                      <label className="block font-semibold text-[#0A2D55] mb-2">Barangays <span className="text-red-500">*</span></label>
-                      <SearchableSelect 
-                        options={barangays.map((b) => ({ code: b.code, name: b.name }))} 
-                        selected={selectedBarangayCodes} 
-                        onChange={(s) => setSelectedBarangayCodes(s)} 
-                        placeholder="Select or type barangays" 
-                        multi={true} 
-                        disabled={selectedMunicipalityCodes.size === 0} 
-                        summaryLabels={{ singular: "barangay", plural: "barangays" }}
-                        allowCustom={true}
-                      />
-                      {errors.barangays && <p className="text-red-500 text-xs mt-1">{errors.barangays}</p>}
-                      {selectedBarangayCodes.size > 0 && (
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          {Array.from(selectedBarangayCodes).map((code) => (
-                            <span key={code} className="inline-flex items-center gap-1.5 bg-[#F2C94C]/20 text-[#8B6F1C] px-3 py-1.5 rounded-full text-xs">{barangayMap.get(String(code)) || code}</span>
-                          ))}
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">MOA Duration</label>
+                          <input value={moaDuration} onChange={(e) => setMoaDuration(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="e.g. 25 years" />
                         </div>
-                      )}
-                    </div>
-                  </div>
+                      </div>
 
-                  <div>
-                    <label className="block font-semibold text-[#0A2D55] mb-2">Remarks</label>
-                    <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
-                  </div>
-                </>
-              )
-            )}
+                      <div>
+                        <label className="block font-semibold text-[#0A2D55] mb-2">Community Benefits</label>
+                        <textarea value={communityBenefits} onChange={(e) => setCommunityBenefits(e.target.value)} rows={3} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="Describe community benefits" />
+                      </div>
+
+                      <div>
+                        <label className="block font-semibold text-[#0A2D55] mb-2">Remarks</label>
+                        <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {/* Regular User Form */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">Survey Number <span className="text-red-500">*</span></label>
+                          <input value={surveyNumber} onChange={(e) => setSurveyNumber(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" placeholder="e.g. ADO-2024-001" />
+                          {errors.surveyNumber && <p className="text-red-500 text-xs mt-1">{errors.surveyNumber}</p>}
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">Total Area (hectares)</label>
+                          <input
+                            value={totalArea}
+                            onChange={(e) => handleTotalAreaChange(e.target.value)}
+                            className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition"
+                            placeholder="e.g. 1,234.56"
+                            type="text"
+                          />
+                          {totalArea && (
+                            <p className="text-xs text-[#0A2D55]/60 mt-1">
+                              {parseTotalArea(totalArea).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ha
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block font-semibold text-[#0A2D55] mb-2">ICC/IP Community</label>
+                        <SearchableSelect
+                          options={ICC_IP_OPTIONS.map((name) => ({ code: name, name }))}
+                          selected={selectedIccIpCodes}
+                          onChange={(s) => setSelectedIccIpCodes(s)}
+                          placeholder="Select ICC/IP"
+                          multi={true}
+                          summaryLabels={{ singular: "group", plural: "groups" }}
+                          allowCustom={true}
+                        />
+                        {selectedIccIpCodes.size > 0 && (
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            {Array.from(selectedIccIpCodes).map((code) => (
+                              <span key={code} className="inline-flex items-center gap-1.5 bg-[#0C3B6E] text-white px-3 py-1.5 rounded-full text-xs">
+                                {code}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">Region <span className="text-red-500">*</span></label>
+                          <SearchableSelect options={regions} selected={selectedRegionCode} onChange={(c) => setSelectedRegionCode(c)} placeholder="Select region" disabled={!!fixedRegion} />
+                          {errors.region && <p className="text-red-500 text-xs mt-1">{errors.region}</p>}
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">Province <span className="text-red-500">*</span></label>
+                          <SearchableSelect
+                            options={provinces.map((p) => ({ code: p.code, name: p.name }))}
+                            selected={selectedProvinceCode}
+                            onChange={(c) => setSelectedProvinceCode(c)}
+                            placeholder="Select or type province"
+                            disabled={!selectedRegionCode}
+                            allowCustom={true}
+                          />
+                          {errors.province && <p className="text-red-500 text-xs mt-1">{errors.province}</p>}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">Municipalities <span className="text-red-500">*</span></label>
+                          <SearchableSelect
+                            options={municipalities.map((m) => ({ code: m.code, name: m.name }))}
+                            selected={selectedMunicipalityCodes}
+                            onChange={(s) => setSelectedMunicipalityCodes(s)}
+                            placeholder="Select or type municipalities"
+                            multi={true}
+                            disabled={!selectedProvinceCode}
+                            summaryLabels={{ singular: "municipality", plural: "municipalities" }}
+                            allowCustom={true}
+                          />
+                          {errors.municipalities && <p className="text-red-500 text-xs mt-1">{errors.municipalities}</p>}
+                          {selectedMunicipalityCodes.size > 0 && (
+                            <div className="flex flex-wrap gap-2 mt-2">
+                              {Array.from(selectedMunicipalityCodes).map((code) => (
+                                <span key={code} className="inline-flex items-center gap-1.5 bg-[#0A2D55]/10 text-[#0A2D55] px-3 py-1.5 rounded-full text-xs">{municipalityMap.get(String(code)) || code}</span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">Barangays <span className="text-red-500">*</span></label>
+                          <SearchableSelect
+                            options={barangays.map((b) => ({ code: b.code, name: b.name }))}
+                            selected={selectedBarangayCodes}
+                            onChange={(s) => setSelectedBarangayCodes(s)}
+                            placeholder="Select or type barangays"
+                            multi={true}
+                            disabled={selectedMunicipalityCodes.size === 0}
+                            summaryLabels={{ singular: "barangay", plural: "barangays" }}
+                            allowCustom={true}
+                          />
+                          {errors.barangays && <p className="text-red-500 text-xs mt-1">{errors.barangays}</p>}
+                          {selectedBarangayCodes.size > 0 && (
+                            <div className="flex flex-wrap gap-2 mt-2">
+                              {Array.from(selectedBarangayCodes).map((code) => (
+                                <span key={code} className="inline-flex items-center gap-1.5 bg-[#F2C94C]/20 text-[#8B6F1C] px-3 py-1.5 rounded-full text-xs">{barangayMap.get(String(code)) || code}</span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block font-semibold text-[#0A2D55] mb-2">Remarks</label>
+                        <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
+                      </div>
+                    </>
+                  )
+                )}
               </div>
             </div>
 
