@@ -85,9 +85,7 @@ export function Dashboard({
   const [importRawSheets, setImportRawSheets] = useState([]);
   const [importCollectionName, setImportCollectionName] = useState('');
   const [showInvalidDetails, setShowInvalidDetails] = useState(false);
-  const [showClearAllModal, setShowClearAllModal] = useState(false);
-  const [isClosingClearAllModal, setIsClosingClearAllModal] = useState(false);
-  const [isClearingAll, setIsClearingAll] = useState(false);
+  
   const [isClearingOngoingFlags, setIsClearingOngoingFlags] = useState(false);
   const [isBatchTagging, setIsBatchTagging] = useState(false);
   const fileInputRef = useRef(null);
@@ -2455,33 +2453,7 @@ export function Dashboard({
     }
   };
 
-  // Clear all records handler
-  const handleClearAll = async () => {
-    setIsClearingAll(true);
-    try {
-      // Delete all mappings one by one
-      for (const mapping of mappings) {
-        await onDeleteMapping(mapping.id);
-      }
-      setAlertTick((t) => t + 1);
-      setAlert({ type: 'success', message: `Successfully deleted ${mappings.length} record(s).` });
-      handleCloseClearAllModal();
-    } catch (error) {
-      setAlertTick((t) => t + 1);
-      setAlert({ type: 'error', message: error?.message || 'Failed to clear records.' });
-    } finally {
-      setIsClearingAll(false);
-    }
-  };
-
-  const handleCloseClearAllModal = () => {
-    if (isClearingAll) return;
-    setIsClosingClearAllModal(true);
-    setTimeout(() => {
-      setShowClearAllModal(false);
-      setIsClosingClearAllModal(false);
-    }, 200);
-  };
+  
 
   // Handle modal close with animation
   const handleCloseModal = () => {
@@ -2588,6 +2560,22 @@ export function Dashboard({
     pending: pendingCount,
   };
 
+  // DEBUG: list which records are considered approved/ongoing/pending
+  try {
+    const debugSource = Array.isArray(statsSource) ? statsSource : [];
+    const approvedList = debugSource.filter((m) => !isOngoingMapping(m));
+    const ongoingList = debugSource.filter((m) => isOngoingMapping(m));
+    const pendingList = debugSource.filter((m) => isPendingMapping(m));
+    console.groupCollapsed('Dashboard debug: counts breakdown');
+    console.log('total', debugSource.length);
+    console.log('approvedCount', approvedList.length, approvedList.map((m) => m && (m.id || m._id || m.surveyNumber || m.importCollection || m.nameOfProject)));
+    console.log('ongoingCount', ongoingList.length, ongoingList.map((m) => m && (m.id || m._id || m.surveyNumber || m.importCollection || m.nameOfProject)));
+    console.log('pendingCount', pendingList.length, pendingList.map((m) => m && (m.id || m._id || m.surveyNumber || m.importCollection || m.nameOfProject)));
+    console.groupEnd();
+  } catch (e) {
+    // ignore in production
+  }
+
   return (
     <div className="min-h-screen bg-[#071A2C]/30">
       {/* Alert (login-style) */}
@@ -2612,87 +2600,7 @@ export function Dashboard({
           </div>
         </div>
       )}
-      {/* Clear All Confirmation Modal */}
-      {showClearAllModal && (
-        <>
-          <div
-            className={cn(
-              "fixed inset-0 z-[100] transition-all duration-200",
-              isClosingClearAllModal ? "animate-out fade-out" : "animate-in fade-in"
-            )}
-            style={{ backdropFilter: 'blur(8px)', backgroundColor: 'rgba(3,6,23,0.45)' }}
-            onClick={() => {
-              if (!isClearingAll) {
-                setIsClosingClearAllModal(true);
-                setTimeout(() => {
-                  setShowClearAllModal(false);
-                  setIsClosingClearAllModal(false);
-                }, 200);
-              }
-            }}
-          />
-
-          <div className={cn(
-            "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[101] w-[92vw] max-w-md transition-all duration-200",
-            isClosingClearAllModal ? "animate-out zoom-out fade-out" : "animate-in zoom-in fade-in"
-          )}>
-            <div className="relative rounded-2xl border border-white/20 bg-white/10 backdrop-blur-2xl shadow-2xl shadow-black/35 overflow-hidden">
-              <div className="px-4 sm:px-6 py-4 sm:py-5" style={{ backgroundImage: 'linear-gradient(135deg, #DC2626 0%, #991B1B 100%)' }}>
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-white/15 rounded-2xl flex items-center justify-center ring-2 ring-white/25 shadow-xl">
-                    <Trash2 size={22} className="text-white" />
-                  </div>
-                  <h3 className="text-xl font-bold text-white tracking-tight">Clear All Records</h3>
-                </div>
-              </div>
-
-              <div className="px-4 sm:px-6 py-4 sm:py-5 text-white/90">
-                <p className="text-sm mb-3">
-                  Are you sure you want to delete <strong className="text-red-300">{mappings.length}</strong> record(s)?
-                </p>
-                <p className="text-xs text-white/70">
-                  This action cannot be undone. All data will be permanently removed from the database.
-                </p>
-              </div>
-
-              <div className="px-4 sm:px-6 py-3 border-t border-white/15 flex gap-3 bg-white/5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsClosingClearAllModal(true);
-                    setTimeout(() => {
-                      setShowClearAllModal(false);
-                      setIsClosingClearAllModal(false);
-                    }, 200);
-                  }}
-                  disabled={isClearingAll}
-                  className="flex-1 px-4 py-2 rounded-lg border border-white/20 text-white/90 hover:bg-white/10 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleClearAll}
-                  disabled={isClearingAll}
-                  className="flex-1 px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                >
-                  {isClearingAll ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      Deleting...
-                    </>
-                  ) : (
-                    <>
-                      <Trash2 size={16} />
-                      Delete All
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
+      
 
       {/* Import Choice Modal */}
       {showImportChoiceModal && (
@@ -2978,16 +2886,7 @@ export function Dashboard({
                   Upload Excel
                 </button>
                 
-                {mappings.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setShowClearAllModal(true)}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white ring-1 ring-red-500/30 backdrop-blur-md hover:bg-red-500/30 transition active:scale-95"
-                  >
-                    <Trash2 size={16} className="sm:w-4.5 sm:h-4.5" />
-                    Clear All Records
-                  </button>
-                )}
+                {/* Clear All Records button removed */}
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -3120,6 +3019,18 @@ export function Dashboard({
                   </div>
                   <div className="w-11 h-11 sm:w-12 sm:h-12 bg-orange-100 rounded-xl flex items-center justify-center flex-shrink-0">
                     <Clock className="w-5 h-5 sm:w-6 sm:h-6 text-orange-500" />
+                  </div>
+                </div>
+              </div>
+              
+              <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-4 sm:p-6 border-l-4 border-violet-600 hover:shadow-xl transition animate-section-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[#0A2D55]/70 text-xs sm:text-sm font-medium truncate">Pending</p>
+                    <p className="text-2xl sm:text-4xl font-bold text-violet-700 mt-1 sm:mt-2">{stats.pending}</p>
+                  </div>
+                  <div className="w-11 h-11 sm:w-12 sm:h-12 bg-violet-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <Bell className="w-5 h-5 sm:w-6 sm:h-6 text-violet-600" />
                   </div>
                 </div>
               </div>
