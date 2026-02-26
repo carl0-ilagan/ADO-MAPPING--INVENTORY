@@ -60,6 +60,8 @@ export function Dashboard({
   const [fabMounted, setFabMounted] = useState(false);
   const [fabRightPx, setFabRightPx] = useState(32);
   const [ongoingSubTab, setOngoingSubTab] = useState('summary');
+  const [pendingSubTab, setPendingSubTab] = useState('summary');
+  const [approvedSubTab, setApprovedSubTab] = useState('car');
   
   const [showViewModal, setShowViewModal] = useState(false);
   const [isClosingViewModal, setIsClosingViewModal] = useState(false);
@@ -125,6 +127,19 @@ export function Dashboard({
     { sheet: 'Region XII', keywords: ['SOCCSKSARGEN'] },
     { sheet: 'Region XIII', keywords: ['CARAGA'] },
   ];
+
+  const isPendingMapping = (m) => {
+    if (!m) return false;
+    try {
+      const status = String(m.status || m.state || m.statusText || '').toLowerCase();
+      if (status.includes('pend')) return true;
+      if (m._pending === true) return true;
+      if (String(m.pending || '').toLowerCase() === 'true') return true;
+    } catch (e) {
+      return false;
+    }
+    return false;
+  };
 
   const detectRegionSheet = (regionValue) => {
     const value = String(regionValue || '').toUpperCase();
@@ -515,6 +530,46 @@ export function Dashboard({
     keys: ['proponent','nameOfProject','typeOfProject','location','area','ancestral','iccs','dateOfApplication','reviewOfApplicationDocuments','needForFBI','issuanceOfWorkOrder','preFBIConference','approvalOfWFP','paymentOfFBIFee','conductOfFBI','preparationOfFBIReport','reviewOfFBIReport','issuanceOfWorkOrderOfFPICTeam','preFPICConference','approvalOfWFP','paymentOfFPICFee','postingOfNotices','firstCommunityAssembly','secondCommunityAssembly','consensusBuildingDecision','proceedToMOANegotiation','issuanceResolutionToProceedToMOA','moaNegotiationPreparation','moaValidationRatificationSigning','issuanceResolutionOfConsent','submissionOfFPICReport','reviewByRRT','reviewByADOorLAO','forComplianceOfFPICTeam','cebDeliberation','cebApproved','preparationSigningCEBResolutionCP','releaseOfCPToProponent','remarks']
   }));
 
+  // Approved subtabs: only regions + extractive company lists as requested
+  const APPROVED_SUBTABS = [
+    { id: 'car', label: 'CAR' },
+    { id: 'region1', label: 'Region 1' },
+    { id: 'region2', label: 'Region 2' },
+    { id: 'region3', label: 'Region 3' },
+    { id: 'region4a', label: 'Region 4A' },
+    { id: 'region4b', label: 'Region 4B' },
+    { id: 'region5', label: 'Region 5' },
+    { id: 'region6-7', label: 'Region 6/7' },
+    { id: 'region8', label: 'Region 8' },
+    { id: 'region9', label: 'Region 9' },
+    { id: 'region10', label: 'Region 10' },
+    { id: 'region11', label: 'Region 11' },
+    { id: 'region12', label: 'Region 12' },
+    { id: 'region13', label: 'Region 13' },
+    { id: 'extractive-copy', label: 'Copy of Extractive mining Companies' },
+    { id: 'extractive-companies', label: 'Extractive mining Companies' },
+  ];
+
+  // Pending subtabs (user-provided list)
+  const PENDING_SUBTABS = [
+    { id: 'summary', label: 'Summary' },
+    { id: 'summary-per-project', label: 'Summary per project' },
+    { id: 'car', label: 'CAR' },
+    { id: 'region1', label: 'Region 1' },
+    { id: 'region2', label: 'Region 2' },
+    { id: 'region3', label: 'Region 3' },
+    { id: 'region4a', label: 'Region 4A' },
+    { id: 'region4b', label: 'Region 4B' },
+    { id: 'region5', label: 'Region 5' },
+    { id: 'region6-7', label: 'Region 6/7' },
+    { id: 'region9', label: 'Region 9' },
+    { id: 'region10', label: 'Region 10' },
+    { id: 'region11', label: 'Region 11' },
+    { id: 'region12', label: 'Region 12' },
+    { id: 'region13', label: 'Region 13' },
+    { id: 'road-projects', label: 'Road Projects' },
+  ];
+
   const computeSummaryRows = (records = []) => {
     const regionMap = new Map();
     records.forEach((m) => {
@@ -653,6 +708,8 @@ export function Dashboard({
         return null;
       };
 
+        
+
       const FIELD_ALIASES = {
         issuanceOfWorkOrder: ['issuanceOfWorkOrder', 'issuance of work order', 'issuance_of_work_order', 'issuanceworkorder', 'issuance_work_order'],
         preFBIConference: ['preFBIConference', 'pre-fbi conference', 'pre_fbi_conference', 'prefbiconference'],
@@ -706,6 +763,145 @@ export function Dashboard({
   };
 
   const currentOngoingTab = ONGOING_SUBTABS.find((s) => s.id === ongoingSubTab) || ONGOING_SUBTABS[0];
+  const currentPendingTab = PENDING_SUBTABS.find((s) => s.id === pendingSubTab) || PENDING_SUBTABS[0];
+  const currentApprovedTab = APPROVED_SUBTABS.find((s) => s.id === approvedSubTab) || APPROVED_SUBTABS[0];
+
+  // Compute summary rows grouped by year applied with counts per region
+  const getYearFromMapping = (m) => {
+    if (!m) return 'Unknown';
+    const candidates = [
+      m.yearApplied, m.year_applied, m.year, m.DateApplied, m.dateApplied, m.date_of_application, m.dateOfApplication,
+      (m.raw_fields && (m.raw_fields.yearApplied || m.raw_fields.dateOfApplication || m.raw_fields.date)) || null,
+    ];
+    for (const c of candidates) {
+      if (!c && c !== 0) continue;
+      try {
+        if (typeof c === 'number' && c > 0) return String(c);
+        const s = String(c || '').trim();
+        const mMatch = s.match(/(\d{4})/);
+        if (mMatch) return mMatch[1];
+      } catch (e) {
+        // ignore
+      }
+    }
+    // Try to parse common date fields
+    try {
+      const dateStr = String(m.date || m.createdAt || m.created_at || '').trim();
+      const d = new Date(dateStr);
+      if (!Number.isNaN(d.getFullYear())) return String(d.getFullYear());
+    } catch (e) { /* ignore */ }
+    return 'Unknown';
+  };
+
+  const computeYearSummaryRows = (records = []) => {
+    const yearMap = new Map();
+    const ensureRow = (year) => {
+      if (!yearMap.has(year)) {
+        yearMap.set(year, {
+          year,
+          CAR: 0, I: 0, II: 0, III: 0, IVA: 0, IVB: 0, V: 0, 'VI/VII': 0, IX: 0, X: 0, XI: 0, XII: 0, XIII: 0,
+        });
+      }
+      return yearMap.get(year);
+    };
+
+    records.forEach((m) => {
+      const year = getYearFromMapping(m) || 'Unknown';
+      const row = ensureRow(year);
+      const candidate = deriveRawRegion(m) || m.region || '';
+      const detected = (detectRegionSheet(candidate) || '').toString();
+      const up = String(detected || '').toUpperCase();
+      if (up.includes('CORDILLERA') || up === 'CAR') row.CAR += 1;
+      else if (up.includes('REGION I') || up === 'I') row.I += 1;
+      else if (up.includes('REGION II') || up === 'II') row.II += 1;
+      else if (up.includes('REGION III') || up === 'III') row.III += 1;
+      else if (up.includes('REGION IV-A') || up.includes('REGION IV') || up === 'REGION IV-A') row.IVA += 1;
+      else if (up.includes('REGION IV-B') || up === 'REGION IV-B') row.IVB += 1;
+      else if (up.includes('REGION V') || up === 'V') row.V += 1;
+      else if (up.includes('REGION VI') || up.includes('REGION VII')) row['VI/VII'] += 1;
+      else if (up.includes('REGION IX') || up === 'REGION IX') row.IX += 1;
+      else if (up.includes('REGION X') || up === 'REGION X') row.X += 1;
+      else if (up.includes('REGION XI') || up === 'REGION XI') row.XI += 1;
+      else if (up.includes('REGION XII') || up === 'REGION XII') row.XII += 1;
+      else if (up.includes('REGION XIII') || up === 'REGION XIII') row.XIII += 1;
+      else {
+        // If region not detected, attempt to map via canonicalRegion string
+        const canon = String(canonicalRegion(candidate) || '').toUpperCase();
+        if (canon === 'CAR') row.CAR += 1;
+        else if (canon === 'Region I'.toUpperCase() || canon === 'I') row.I += 1;
+        else if (canon === 'Region II'.toUpperCase() || canon === 'II') row.II += 1;
+        else if (canon === 'Region III'.toUpperCase() || canon === 'III') row.III += 1;
+        else if (canon === 'Region IV-A'.toUpperCase() || canon === 'IVA') row.IVA += 1;
+        else if (canon === 'Region IV-B'.toUpperCase() || canon === 'IVB') row.IVB += 1;
+        else if (canon === 'Region V'.toUpperCase() || canon === 'V') row.V += 1;
+        else if (canon === 'Region VI'.toUpperCase() || canon === 'Region VII'.toUpperCase()) row['VI/VII'] += 1;
+        else if (canon === 'Region IX'.toUpperCase() || canon === 'IX') row.IX += 1;
+        else if (canon === 'Region X'.toUpperCase() || canon === 'X') row.X += 1;
+        else if (canon === 'Region XI'.toUpperCase() || canon === 'XI') row.XI += 1;
+        else if (canon === 'Region XII'.toUpperCase() || canon === 'XII') row.XII += 1;
+        else if (canon === 'Region XIII'.toUpperCase() || canon === 'XIII') row.XIII += 1;
+      }
+    });
+
+    const rows = Array.from(yearMap.values()).sort((a, b) => {
+      if (a.year === 'Unknown') return 1;
+      if (b.year === 'Unknown') return -1;
+      return Number(b.year || 0) - Number(a.year || 0);
+    });
+    // compute totals per row
+    rows.forEach((r) => {
+      r.TOTAL = (
+        Number(r.CAR||0)+Number(r.I||0)+Number(r.II||0)+Number(r.III||0)+Number(r.IVA||0)+Number(r.IVB||0)+Number(r.V||0)+Number(r['VI/VII']||0)+Number(r.IX||0)+Number(r.X||0)+Number(r.XI||0)+Number(r.XII||0)+Number(r.XIII||0)
+      );
+    });
+    return rows;
+  };
+
+  // Compute counts by project type for 'Summary per project'
+  const computeProjectTypeSummaryRows = (records = []) => {
+    const categories = [
+      'Mining/ Mineral processing project', 'Energy Project', 'Forest Management project', 'EPR', 'Research project',
+      'Road projects', 'Sand and Gravel', 'Irrigation project', 'Livelihood Programs', 'Eco-Tourism Project',
+      'FLGMA', 'Telecommunication', 'Carbon Trading', 'Tree Cutting project', 'Plantation/ Pearl project', 'Water System Project', 'Others'
+    ];
+    const counts = categories.reduce((acc, c) => ({ ...acc, [c]: 0 }), {});
+
+    const detectProjectCategory = (m) => {
+      if (!m) return 'Others';
+      const candidates = [
+        m.typeOfProject, m.type_of_project, m.type, m.projectType, m.nameOfProject, m.projectName,
+        (m.raw_fields && (m.raw_fields.typeOfProject || m.raw_fields['Type of project'] || m.raw_fields['type'])) || null,
+      ];
+      const text = String(candidates.find((c) => c) || '').toLowerCase();
+      if (!text) return 'Others';
+      if (text.includes('mining') || text.includes('mineral')) return 'Mining/ Mineral processing project';
+      if (text.includes('energy') || text.includes('power')) return 'Energy Project';
+      if (text.includes('forest')) return 'Forest Management project';
+      if (text.includes('epr')) return 'EPR';
+      if (text.includes('research')) return 'Research project';
+      if (text.includes('road')) return 'Road projects';
+      if (text.includes('sand') || text.includes('gravel')) return 'Sand and Gravel';
+      if (text.includes('irrig') ) return 'Irrigation project';
+      if (text.includes('livelihood')) return 'Livelihood Programs';
+      if (text.includes('eco') || text.includes('tourism')) return 'Eco-Tourism Project';
+      if (text.includes('flgma')) return 'FLGMA';
+      if (text.includes('telecom') || text.includes('telecommunication')) return 'Telecommunication';
+      if (text.includes('carbon')) return 'Carbon Trading';
+      if (text.includes('tree') || text.includes('cutting')) return 'Tree Cutting project';
+      if (text.includes('plantation') || text.includes('pearl')) return 'Plantation/ Pearl project';
+      if (text.includes('water') || text.includes('water system')) return 'Water System Project';
+      return 'Others';
+    };
+
+    (records || []).forEach((m) => {
+      const cat = detectProjectCategory(m);
+      if (counts.hasOwnProperty(cat)) counts[cat] += 1;
+      else counts['Others'] += 1;
+    });
+
+    counts.TOTAL = Object.keys(counts).filter((k) => k !== 'TOTAL').reduce((s, k) => s + Number(counts[k] || 0), 0);
+    return { categories, counts };
+  };
 
   const tabsHeader = (
     <div className="mb-4 -mx-3 px-3 py-2 overflow-x-auto scrollbar-thin">
@@ -1363,7 +1559,34 @@ export function Dashboard({
       if (ic && ic.includes('ongoing')) return false;
     }
     const query = searchQuery.toLowerCase();
-    if (regionFilter !== 'all' && canonicalRegion(mapping.region) !== regionFilter) return false;
+    // If an approved subtab is active and is region-specific, apply subtab filtering
+    const approvedId = String(approvedSubTab || '').toLowerCase();
+    const unfilteredApprovedTabs = ['summary', 'summary-per-project', 'denied-by-mgb', 'inactive'];
+    if (!unfilteredApprovedTabs.includes(approvedId)) {
+      // Handle CAR
+      if (approvedId === 'car') {
+        const candidate = deriveRawRegion(mapping) || mapping.region || '';
+        const d = detectRegionSheet(candidate);
+        const v = String(candidate || '').toUpperCase();
+        if (!(d === 'CAR' || v.includes('CORDILLERA') || v.includes('CAR'))) return false;
+      } else if (approvedId === 'region6-7') {
+        const candidate = deriveRawRegion(mapping) || mapping.region || '';
+        const d = detectRegionSheet(candidate);
+        if (!(d === 'Region VI' || d === 'Region VII')) return false;
+      } else if (approvedId.startsWith('region')) {
+        // map regionN to Region N or Region IV-A/IV-B
+        const regionMap = {
+          region1: 'Region I', region2: 'Region II', region3: 'Region III', region4a: 'Region IV-A', region4b: 'Region IV-B', region5: 'Region V', region9: 'Region IX', region10: 'Region X', region11: 'Region XI', region12: 'Region XII', region13: 'Region XIII'
+        };
+        if (Object.prototype.hasOwnProperty.call(regionMap, approvedId)) {
+          const candidate = deriveRawRegion(mapping) || mapping.region || '';
+          const d = detectRegionSheet(candidate);
+          if (d !== regionMap[approvedId]) return false;
+        }
+      }
+    } else {
+      if (regionFilter !== 'all' && canonicalRegion(mapping.region) !== regionFilter) return false;
+    }
     if (remarksFilter === 'with' && String(mapping.remarks || '').trim() === '') return false;
     if (remarksFilter === 'none' && String(mapping.remarks || '').trim() !== '') return false;
     return (
@@ -1397,6 +1620,131 @@ export function Dashboard({
   const ongoingStart = (currentPage - 1) * itemsPerPage;
   const ongoingEnd = ongoingStart + itemsPerPage;
   const paginatedOngoing = Array.isArray(filteredOngoingRecords) ? filteredOngoingRecords.slice(ongoingStart, ongoingEnd) : [];
+
+  // Pending records (detection by status/_pending/pending flag) with subtabs
+  const pendingRecordsAll = Array.isArray(mappings) ? mappings.filter((m) => isPendingMapping(m)) : [];
+
+  const filteredPendingRecords = React.useMemo(() => {
+    if (!Array.isArray(pendingRecordsAll)) return [];
+    const id = String(pendingSubTab || '').toLowerCase();
+    const unfilteredTabs = ['summary', 'summary-per-project'];
+
+    const query = String(searchQuery || '').toLowerCase();
+    const prefiltered = pendingRecordsAll.filter((mapping) => {
+      if (!mapping) return false;
+      if (regionFilter !== 'all') {
+        const canon = canonicalRegion(mapping.region || '');
+        if (canon !== regionFilter) return false;
+      }
+      if (remarksFilter === 'with' && String(mapping.remarks || '').trim() === '') return false;
+      if (remarksFilter === 'none' && String(mapping.remarks || '').trim() !== '') return false;
+      if (!query) return true;
+      return (
+        String(mapping.surveyNumber || '').toLowerCase().includes(query) ||
+        String(mapping.region || '').toLowerCase().includes(query) ||
+        String(mapping.province || '').toLowerCase().includes(query) ||
+        String(mapping.municipality || '').toLowerCase().includes(query) ||
+        (Array.isArray(mapping.municipalities) && mapping.municipalities.join(', ').toLowerCase().includes(query)) ||
+        (Array.isArray(mapping.barangays) && mapping.barangays.join(', ').toLowerCase().includes(query)) ||
+        (Array.isArray(mapping.icc) && mapping.icc.join(', ').toLowerCase().includes(query)) ||
+        String(mapping.remarks || '').toLowerCase().includes(query) ||
+        String(mapping.proponent || mapping.applicant || mapping.applicantProponent || mapping.nameOfProject || mapping.projectName || '').toLowerCase().includes(query)
+      );
+    });
+
+    if (unfilteredTabs.includes(id)) return prefiltered;
+
+    // CAR handling
+    if (id === 'car') {
+      return prefiltered.filter((rec) => {
+        const candidate = deriveRawRegion(rec) || rec.region || '';
+        const d = detectRegionSheet(candidate);
+        if (d === 'CAR') return true;
+        const v = String(candidate || '').toUpperCase();
+        return v.includes('CORDILLERA') || v.includes('CAR');
+      });
+    }
+
+    // Combined Region 6/7
+    if (id === 'region6-7') {
+      return prefiltered.filter((rec) => {
+        const candidate = deriveRawRegion(rec) || rec.region || '';
+        const d = detectRegionSheet(candidate);
+        return d === 'Region VI' || d === 'Region VII';
+      });
+    }
+
+    // Road projects filter
+    if (id === 'road-projects') {
+      return prefiltered.filter((rec) => {
+        const candidate = String(rec.typeOfProject || rec.type_of_project || rec.type || rec.projectType || rec.nameOfProject || rec.projectName || '') || '';
+        return candidate.toLowerCase().includes('road');
+      });
+    }
+
+    // Generic region tabs (region1, region2, ...)
+    const regionMap = {
+      region1: 'Region I', region2: 'Region II', region3: 'Region III', region4a: 'Region IV-A', region4b: 'Region IV-B', region5: 'Region V', region9: 'Region IX', region10: 'Region X', region11: 'Region XI', region12: 'Region XII', region13: 'Region XIII'
+    };
+    if (Object.prototype.hasOwnProperty.call(regionMap, id)) {
+      return prefiltered.filter((rec) => {
+        const candidate = deriveRawRegion(rec) || rec.region || '';
+        const detected = detectRegionSheet(candidate);
+        if (detected === regionMap[id]) return true;
+        const canon = canonicalRegion(candidate) || '';
+        return canon === regionMap[id] || String(candidate || '').toUpperCase().includes(String(regionMap[id] || '').toUpperCase());
+      });
+    }
+
+    return prefiltered;
+  }, [pendingRecordsAll, pendingSubTab, searchQuery, regionFilter, remarksFilter]);
+
+  const pendingTotalPages = Math.max(1, Math.ceil(((filteredPendingRecords && filteredPendingRecords.length) || 0) / itemsPerPage));
+  const pendingStart = (currentPage - 1) * itemsPerPage;
+  const pendingEnd = pendingStart + itemsPerPage;
+  const paginatedPending = Array.isArray(filteredPendingRecords) ? filteredPendingRecords.slice(pendingStart, pendingEnd) : [];
+
+  const pendingSummaryRows = computeSummaryRows(filteredPendingRecords || []);
+  const pendingYearSummaryRows = computeYearSummaryRows(filteredPendingRecords || []);
+  const { categories: pendingProjectCategories, counts: pendingProjectCounts } = computeProjectTypeSummaryRows(filteredPendingRecords || []);
+  const pendingSummaryTotals = React.useMemo(() => {
+    const totals = {
+      region: 'Total',
+      total: 0,
+      issuanceOfWorkOrder: 0,
+      preFBIConference: 0,
+      conductOfFBI: 0,
+      reviewOfFBIReport: 0,
+      preFPICConference: 0,
+      firstCommunityAssembly: 0,
+      secondCommunityAssembly: 0,
+      consensusBuildingDecision: 0,
+      moaValidationRatificationSigning: 0,
+      issuanceResolutionOfConsent: 0,
+      reviewByRRT: 0,
+      reviewByADOorLAO: 0,
+      forComplianceOfFPICTeam: 0,
+      cebDeliberation: 0,
+    };
+    (pendingSummaryRows || []).forEach((r) => {
+      totals.total += Number(r.total || 0);
+      totals.issuanceOfWorkOrder += Number(r.issuanceOfWorkOrder || 0);
+      totals.preFBIConference += Number(r.preFBIConference || 0);
+      totals.conductOfFBI += Number(r.conductOfFBI || 0);
+      totals.reviewOfFBIReport += Number(r.reviewOfFBIReport || 0);
+      totals.preFPICConference += Number(r.preFPICConference || 0);
+      totals.firstCommunityAssembly += Number(r.firstCommunityAssembly || 0);
+      totals.secondCommunityAssembly += Number(r.secondCommunityAssembly || 0);
+      totals.consensusBuildingDecision += Number(r.consensusBuildingDecision || 0);
+      totals.moaValidationRatificationSigning += Number(r.moaValidationRatificationSigning || 0);
+      totals.issuanceResolutionOfConsent += Number(r.issuanceResolutionOfConsent || 0);
+      totals.reviewByRRT += Number(r.reviewByRRT || 0);
+      totals.reviewByADOorLAO += Number(r.reviewByADOorLAO || 0);
+      totals.forComplianceOfFPICTeam += Number(r.forComplianceOfFPICTeam || 0);
+      totals.cebDeliberation += Number(r.cebDeliberation || 0);
+    });
+    return totals;
+  }, [pendingSummaryRows]);
 
   const filteredCollectionsForDropdown = React.useMemo(() => {
     if (!Array.isArray(availableCollections)) return [];
@@ -1432,9 +1780,10 @@ export function Dashboard({
   const [dropdownSelections, setDropdownSelections] = useState(() => ({
     mappings: selectedCollection || 'mappings',
     ongoing: (selectedCollection && String(selectedCollection).toLowerCase().includes('ongoing')) ? selectedCollection : '__none__',
+    pending: (selectedCollection && String(selectedCollection).toLowerCase().includes('pending')) ? selectedCollection : '__none__',
   }));
 
-  const currentSelectionKey = activeTab === 'ongoing' ? 'ongoing' : 'mappings';
+  const currentSelectionKey = activeTab === 'ongoing' ? 'ongoing' : (activeTab === 'pending' ? 'pending' : 'mappings');
   const currentSelectionValue = (dropdownSelections && dropdownSelections[currentSelectionKey]) || '';
   const currentSelectionDisplay = (Array.isArray(availableCollections) && availableCollections.find((c) => c.collectionName === currentSelectionValue)?.displayName) || (currentSelectionValue && currentSelectionValue !== '__none__' ? currentSelectionValue : 'Select collection');
 
@@ -1473,14 +1822,14 @@ export function Dashboard({
   // When the active tab changes, load the stored dropdown selection for that tab.
   useEffect(() => {
     try {
-      const key = activeTab === 'ongoing' ? 'ongoing' : 'mappings';
+      const key = activeTab === 'ongoing' ? 'ongoing' : (activeTab === 'pending' ? 'pending' : 'mappings');
       const value = dropdownSelections[key];
       if (!value || value === '__none__') return;
       if (typeof onSelectCollection === 'function') {
         // Only trigger load if App hasn't already selected the same collection
         // Defensive: don't call onSelectCollection('mappings') when switching to ongoing
-        if (activeTab === 'ongoing' && String(value) === 'mappings') {
-          console.log('Dashboard: skipping invalid ongoing selection value="mappings"');
+        if ((activeTab === 'ongoing' || activeTab === 'pending') && String(value) === 'mappings') {
+          console.log('Dashboard: skipping invalid selection value="mappings" for ongoing/pending tab');
           return;
         }
 
@@ -1500,31 +1849,38 @@ export function Dashboard({
   // the stored ongoing collection (or the first available) so the table isn't empty.
   useEffect(() => {
     try {
-      if (activeTab !== 'ongoing') return;
+      if (activeTab !== 'ongoing' && activeTab !== 'pending') return;
       // If there are already mappings loaded, do nothing
       if (Array.isArray(mappings) && mappings.length > 0) return;
 
-      let desired = (dropdownSelections && dropdownSelections.ongoing && dropdownSelections.ongoing !== '__none__')
-        ? dropdownSelections.ongoing
-        : (Array.isArray(filteredCollectionsForDropdown) && filteredCollectionsForDropdown[0] ? filteredCollectionsForDropdown[0].collectionName : null);
+      let desired = null;
+      if (activeTab === 'ongoing') {
+        desired = (dropdownSelections && dropdownSelections.ongoing && dropdownSelections.ongoing !== '__none__')
+          ? dropdownSelections.ongoing
+          : (Array.isArray(filteredCollectionsForDropdown) && filteredCollectionsForDropdown[0] ? filteredCollectionsForDropdown[0].collectionName : null);
 
-      // If the desired/current selection is the generic 'mappings' but no mappings
-      // are loaded, prefer any available ongoing collection (first in list).
-      if (String(desired).toLowerCase() === 'mappings' && Array.isArray(filteredCollectionsForDropdown) && filteredCollectionsForDropdown.length > 0) {
-        const firstOngoing = filteredCollectionsForDropdown.find((c) => String(c.collectionName || '').toLowerCase().includes('ongoing')) || filteredCollectionsForDropdown[0];
-        if (firstOngoing && firstOngoing.collectionName) desired = firstOngoing.collectionName;
+        // If the desired/current selection is the generic 'mappings' but no mappings
+        // are loaded, prefer any available ongoing collection (first in list).
+        if (String(desired).toLowerCase() === 'mappings' && Array.isArray(filteredCollectionsForDropdown) && filteredCollectionsForDropdown.length > 0) {
+          const firstOngoing = filteredCollectionsForDropdown.find((c) => String(c.collectionName || '').toLowerCase().includes('ongoing')) || filteredCollectionsForDropdown[0];
+          if (firstOngoing && firstOngoing.collectionName) desired = firstOngoing.collectionName;
+        }
+      } else if (activeTab === 'pending') {
+        desired = (dropdownSelections && dropdownSelections.pending && dropdownSelections.pending !== '__none__')
+          ? dropdownSelections.pending
+          : (Array.isArray(filteredCollectionsForDropdown) && filteredCollectionsForDropdown[0] ? filteredCollectionsForDropdown[0].collectionName : null);
       }
 
       if (!desired) return;
 
       if (!selectedCollection || String(selectedCollection) !== String(desired)) {
-        console.log('Dashboard: activeTab is ongoing and no mappings loaded — loading', desired);
+        console.log(`Dashboard: activeTab is ${activeTab} and no mappings loaded — loading`, desired);
         if (typeof onSelectCollection === 'function') onSelectCollection(desired);
       } else {
-        console.log('Dashboard: activeTab is ongoing but selectedCollection already matches', selectedCollection);
-        // If selectedCollection is 'mappings' but there are no mappings yet, try to load
-        // a real ongoing collection if available.
-        if (Array.isArray(mappings) && mappings.length === 0 && String(selectedCollection).toLowerCase() === 'mappings' && Array.isArray(filteredCollectionsForDropdown) && filteredCollectionsForDropdown.length > 0) {
+        console.log(`Dashboard: activeTab is ${activeTab} but selectedCollection already matches`, selectedCollection);
+        // If selectedCollection is 'mappings' but there are no mappings yet, and we're on ongoing,
+        // try to load a real ongoing collection if available.
+        if (activeTab === 'ongoing' && Array.isArray(mappings) && mappings.length === 0 && String(selectedCollection).toLowerCase() === 'mappings' && Array.isArray(filteredCollectionsForDropdown) && filteredCollectionsForDropdown.length > 0) {
           const fallback = filteredCollectionsForDropdown.find((c) => String(c.collectionName || '').toLowerCase().includes('ongoing')) || filteredCollectionsForDropdown[0];
           if (fallback && fallback.collectionName && typeof onSelectCollection === 'function' && String(fallback.collectionName) !== String(selectedCollection)) {
             console.log('Dashboard: fallback loading ongoing collection ->', fallback.collectionName);
@@ -2198,6 +2554,7 @@ export function Dashboard({
   const statsSource = (activeTab === 'overview') ? overviewSource : mappings;
   const ongoingCount = Array.isArray(statsSource) ? statsSource.filter((m) => isOngoingMapping(m)).length : 0;
   const approvedCount = Array.isArray(statsSource) ? statsSource.filter((m) => !isOngoingMapping(m)).length : 0;
+  const pendingCount = Array.isArray(statsSource) ? statsSource.filter((m) => isPendingMapping(m)).length : 0;
 
   // Diagnostic logging: show breakdown of how ongoing is being counted
   try {
@@ -2228,6 +2585,7 @@ export function Dashboard({
     regions: new Set((activeTab === 'overview' ? overviewSource : mappings).map((m) => m.region)).size,
     approved: approvedCount,
     ongoing: ongoingCount,
+    pending: pendingCount,
   };
 
   return (
@@ -2575,14 +2933,14 @@ export function Dashboard({
                   <div className="flex items-center gap-2 mr-2">
                     <label className="sr-only">Collection</label>
                     <Select
-                      value={dropdownSelections[activeTab === 'ongoing' ? 'ongoing' : 'mappings']}
+                      value={dropdownSelections[activeTab === 'ongoing' ? 'ongoing' : (activeTab === 'pending' ? 'pending' : 'mappings')]}
                       onValueChange={(value) => {
-                        const key = activeTab === 'ongoing' ? 'ongoing' : 'mappings';
+                        const key = activeTab === 'ongoing' ? 'ongoing' : (activeTab === 'pending' ? 'pending' : 'mappings');
                         console.log('Dashboard: dropdown changed ->', { key, value, activeTab, selectedCollection });
                         setDropdownSelections((s) => ({ ...s, [key]: value }));
                         // If the dropdown change happened on the currently active tab,
                         // load the collection immediately so the selected data remains visible.
-                        if ((activeTab === 'ongoing' && key === 'ongoing') || (activeTab === 'mappings' && key === 'mappings')) {
+                        if (activeTab === key) {
                           // don't trigger load for the placeholder empty entry
                           if (value && value !== '__none__' && typeof onSelectCollection === 'function') {
                             console.log('Dashboard: calling onSelectCollection from dropdown ->', value);
@@ -2692,6 +3050,20 @@ export function Dashboard({
               <Bell size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
               <span>Ongoing Large Scale</span>
             </button>
+            <button
+              onClick={() => {
+                setActiveTab('pending');
+                setMobileMenuOpen(false);
+              }}
+              className={`flex-1 min-w-0 sm:flex-none px-3 sm:px-5 py-3 sm:py-3.5 font-medium text-xs sm:text-base border-b-2 transition whitespace-nowrap flex items-center justify-center gap-1.5 sm:gap-2 ${
+                activeTab === 'pending'
+                  ? 'border-[#F2C94C] text-[#0A2D55] bg-[#F2C94C]/10'
+                  : 'border-transparent text-[#0A2D55]/70 hover:text-[#0A2D55] hover:bg-[#0A2D55]/5'
+              }`}
+            >
+              <Clock size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
+              <span>Pending</span>
+            </button>
           </div>
         </nav>
       </div>
@@ -2756,6 +3128,214 @@ export function Dashboard({
           </div>
         )}
 
+        {activeTab === 'pending' && (
+          <div className="animate-section-1">
+            <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 animate-header">
+              <h2 className="text-lg sm:text-2xl font-bold text-[#0A2D55]">Pending</h2>
+              <div className="w-full sm:w-auto flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                <div className="w-full sm:w-[320px] flex items-center gap-2 bg-white border-2 border-[#0A2D55]/10 rounded-xl px-4 py-2.5 hover:border-[#F2C94C]/40 focus-within:border-[#F2C94C] focus-within:ring-2 focus-within:ring-[#F2C94C]/40 transition-all shadow-sm hover:shadow-md">
+                  <Search size={18} className="text-[#0A2D55]/40 flex-shrink-0" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => handleSearch(e.target.value)}
+                    placeholder="Search survey number, proponent, location, ICC..."
+                    className="flex-1 bg-transparent border-none outline-none text-sm text-[#0A2D55] placeholder-[#0A2D55]/50 min-w-0"
+                  />
+                  {searchQuery && (
+                    <button
+                      onClick={() => handleSearch('')}
+                      className="text-[#0A2D55]/50 hover:text-[#0A2D55] transition flex-shrink-0"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div ref={null} className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-6 overflow-x-auto">
+              {/* Pending subtabs */}
+              <>
+                <div className="mb-4 -mx-3 px-3 py-2 overflow-x-auto scrollbar-thin">
+                  <div className="flex items-center gap-3 min-w-max">
+                    {PENDING_SUBTABS.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => { setPendingSubTab(t.id); setCurrentPage(1); }}
+                        className={cn(
+                          'px-2.5 py-1 rounded-md text-xs font-semibold whitespace-nowrap',
+                          pendingSubTab === t.id ? 'bg-[#0A2D55] text-white shadow-sm' : 'bg-white/10 text-[#0A2D55] hover:bg-white/20'
+                        )}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {currentPendingTab.id === 'summary' && (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-[1100px] w-full table-auto">
+                      <thead className="bg-[#0A2D55]/5 border-b border-[#0A2D55]/15">
+                        <tr>
+                            {[
+                            'YEAR APPLIED', 'CAR', 'I', 'II', 'III', 'IVA', 'IVB', 'V', '6/7', 'IX', 'X', 'XI', 'XII', 'XIII', 'TOTAL'
+                          ].map((h, i) => (
+                            <th key={i} title={h} className="px-3 sm:px-4 py-2 text-left text-[11px] sm:text-[12px] font-semibold text-[#0A2D55] normal-case leading-snug whitespace-nowrap truncate max-w-[220px]">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pendingYearSummaryRows.length === 0 ? (
+                          <tr>
+                            <td colSpan={15} className="px-4 sm:px-6 py-6 text-center text-[#0A2D55]/60">No pending items yet.</td>
+                          </tr>
+                        ) : (
+                          <>
+                            {pendingYearSummaryRows.map((r, idx) => (
+                              <tr key={r.year || idx} className="border-b border-[#0A2D55]/10">
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.year}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal font-semibold">{r.CAR}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.I}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.II}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.III}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.IVA}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.IVB}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.V}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r['VI/VII']}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.IX}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.X}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.XI}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.XII}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.XIII}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.TOTAL}</td>
+                              </tr>
+                            ))}
+                          </>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {currentPendingTab.id === 'summary-per-project' && (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-[1100px] w-full table-auto">
+                      <thead className="bg-[#0A2D55]/5 border-b border-[#0A2D55]/15">
+                        <tr>
+                          {[
+                            'Mining/ Mineral processing project','Energy Project','Forest Management project','EPR','Research project','Road projects','Sand and Gravel','Irrigation project','Livelihood Programs','Eco-Tourism Project','FLGMA','Telecommunication','Carbon Trading','Tree Cutting project','Plantation/ Pearl project','Water System Project','Others','TOTAL'
+                          ].map((h, i) => (
+                            <th key={i} title={h} className="px-3 sm:px-4 py-2 text-left text-[11px] sm:text-[12px] font-semibold text-[#0A2D55] normal-case leading-snug whitespace-nowrap truncate max-w-[220px]">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          {pendingProjectCategories.map((cat, i) => (
+                            <td key={i} className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal font-semibold">{pendingProjectCounts[cat] || 0}</td>
+                          ))}
+                          <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal font-semibold">{pendingProjectCounts.TOTAL || 0}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {currentPendingTab.id !== 'summary' && currentPendingTab.id !== 'summary-per-project' && (
+                  (() => {
+                    const regionTableTabs = ['car','region1','region2','region3','region4a','region4b','region5','region6-7','region9','region10','region11','region12','region13','road-projects'];
+                    if (regionTableTabs.includes(String(currentPendingTab.id || '').toLowerCase())) {
+                      const PENDING_REGION_HEADERS = [
+                        'NO','REGION','DATE OF FILING OF CP APPLICATION','NAME OF PROPONENT','NAME OF PROJECT','Project Cost','LOCATION','Type of Project','AFFECTED AD/ICC/IP','(for CP with ongoing FPIC)','STATUS OF APPLICATION','STATUS'
+                      ];
+                      return (
+                        <div className="overflow-x-auto">
+                          <table className="min-w-[1100px] w-full table-auto">
+                            <thead className="bg-[#0A2D55]/5 border-b border-[#0A2D55]/15">
+                              <tr>
+                                {PENDING_REGION_HEADERS.map((h, i) => (
+                                  <th key={i} title={h} className="px-3 sm:px-4 py-2 text-left text-[11px] sm:text-[12px] font-semibold text-[#0A2D55] normal-case leading-snug whitespace-nowrap truncate max-w-[220px]">{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {paginatedPending.length === 0 ? (
+                                <tr><td colSpan={PENDING_REGION_HEADERS.length} className="px-4 sm:px-6 py-6 text-center text-[#0A2D55]/60">No pending items.</td></tr>
+                              ) : (
+                                paginatedPending.map((mapping, idx) => (
+                                  <tr key={mapping.controlNumber || mapping.surveyNumber || idx} className="border-b border-[#0A2D55]/10">
+                                    {PENDING_REGION_HEADERS.map((h, j) => (
+                                      <td key={j} className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal" title={String(renderCellForHeader(mapping, h) || '')}>{renderCellForHeader(mapping, h)}</td>
+                                    ))}
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      );
+                    }
+
+                    // Default: fallback list view for other pending subtabs
+                    return (
+                      <div className="mt-3 space-y-2">
+                        {paginatedPending.map((m, idx) => (
+                          <div key={idx} className="border border-[#0A2D55]/10 rounded-lg p-3 flex items-center justify-between">
+                            <div className="min-w-0">
+                              <div className="text-sm font-bold text-[#0A2D55] truncate">{m.surveyNumber || m.controlNumber || m.control_number || '—'}</div>
+                              <div className="text-xs text-[#0A2D55]/60 truncate">{m.region || m.province || ''}</div>
+                            </div>
+                            <div className="text-xs text-[#0A2D55]/60">{m.remarks ? 'Has remarks' : ''}</div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()
+                )}
+              </>
+
+              <div className="flex items-center justify-between px-4 sm:px-6 py-4 sm:py-5 border-t border-[#0A2D55]/10 bg-[#0A2D55]/2">
+                <div className="text-xs sm:text-sm text-[#0A2D55]/70 font-medium">
+                  Showing <span className="font-bold text-[#0A2D55]">{pendingStart + 1}</span> to <span className="font-bold text-[#0A2D55]">{Math.min(pendingEnd, (filteredPendingRecords || []).length)}</span> of <span className="font-bold text-[#0A2D55]">{(filteredPendingRecords || []).length}</span> records
+                </div>
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <button
+                    onClick={() => setCurrentPage(currentPage - 1)}
+                    disabled={currentPage <= 1}
+                    className={cn(
+                      'flex items-center justify-center gap-1 px-2.5 sm:px-4 py-2 rounded-lg font-semibold text-xs sm:text-sm transition',
+                      currentPage > 1
+                        ? 'bg-[#0A2D55] text-white hover:bg-[#0C3B6E] active:scale-95 shadow-md'
+                        : 'bg-[#0A2D55]/20 text-[#0A2D55]/50 cursor-not-allowed'
+                    )}
+                    aria-label="Previous page"
+                  >
+                    <span className="sm:hidden">←</span>
+                    <span className="hidden sm:inline">← Previous</span>
+                  </button>
+                  <div className="text-xs sm:text-sm text-[#0A2D55] font-semibold px-2 py-1">
+                    Page <span className="text-[#F2C94C]">{currentPage}</span> of <span className="text-[#F2C94C]">{pendingTotalPages || 1}</span>
+                  </div>
+                  <button
+                    onClick={() => setCurrentPage(currentPage + 1)}
+                    disabled={currentPage >= pendingTotalPages}
+                    className={cn(
+                      'flex items-center justify-center gap-1 px-2.5 sm:px-4 py-2 rounded-lg font-semibold text-xs sm:text-sm transition',
+                      currentPage < pendingTotalPages
+                        ? 'bg-[#0A2D55] text-white hover:bg-[#0C3B6E] active:scale-95 shadow-md'
+                        : 'bg-[#0A2D55]/20 text-[#0A2D55]/50 cursor-not-allowed'
+                    )}
+                    aria-label="Next page"
+                  >
+                    <span className="hidden sm:inline">Next →</span>
+                    <span className="sm:hidden">→</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         {activeTab === 'mappings' && (
           <div className="animate-section-1">
             <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 animate-header">
@@ -2780,24 +3360,7 @@ export function Dashboard({
                   )}
                 </div>
 
-                <div className="w-full sm:w-[200px]">
-                  <Select
-                    value={regionFilter}
-                    onValueChange={(value) => {
-                      setRegionFilter(value);
-                      setCurrentPage(1);
-                    }}
-                  >
-                    <SelectTrigger className="w-full bg-white border-2 border-[#0A2D55]/10 rounded-xl px-4 py-2.5 text-sm text-[#0A2D55] hover:border-[#F2C94C]/40 focus:ring-[#F2C94C]/40 shadow-sm">
-                      <SelectValue placeholder="All Regions" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-white border-[#0A2D55]/10 rounded-xl shadow-2xl">
-                      {regionOptions.map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                {/* Region dropdown removed per user request */}
 
                 <div className="w-full sm:w-[200px]">
                   <Select
@@ -2820,264 +3383,140 @@ export function Dashboard({
               </div>
             </div>
 
-            {filteredMappings.length === 0 ? (
-              <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg border border-white/20 p-8 sm:p-12 text-center animate-section-2">
-                <MapIcon className="w-12 h-12 sm:w-16 sm:h-16 text-[#0A2D55]/30 mx-auto mb-4" />
-                <p className="text-[#0A2D55]/70 text-sm sm:text-lg">
-                  {searchQuery ? 'No mappings found matching your search.' : 'No mappings yet. Create your first mapping to get started.'}
-                </p>
-              </div>
-            ) : (
-              <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg border border-white/20 overflow-hidden animate-section-2">
-                {/* Desktop Table */}
-                <div ref={approvedContainerRef} className="hidden sm:block overflow-x-auto">
-                  <table className={isInventoryUser ? "w-full table-auto min-w-[1600px]" : "w-full table-fixed"}>
-                    <thead className="bg-[#0A2D55]/5 border-b border-[#0A2D55]/15">
-                      <tr>
-                        {getTableHeaders().map((h, idx) => (
-                          <th
-                            key={idx}
-                            className={
-                              isInventoryUser
-                                ? "px-3 sm:px-4 py-2 text-left text-[10px] sm:text-xs font-semibold text-[#0A2D55] normal-case leading-snug whitespace-normal break-words min-w-[120px]"
-                                : "px-3 sm:px-4 py-2 text-left text-[10px] sm:text-xs font-semibold text-[#0A2D55] normal-case leading-snug"
-                            }
-                          >
-                            {h}
-                          </th>
-                        ))}
-                        <th className="px-3 sm:px-4 py-2 text-left text-[10px] sm:text-xs font-semibold text-[#0A2D55] normal-case w-[120px] sticky right-0 bg-[#F4F7FA] shadow-[-6px_0_10px_rgba(7,26,44,0.06)]">ACTIONS</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {paginatedMappings.map((mapping, idx) => (
-                        <tr
-                          key={idx}
-                          className="border-b border-[#0A2D55]/10 hover:bg-[#F2C94C]/5 transition fade-in-up"
-                          style={{ animationDelay: `${idx * 100 + 400}ms`, opacity: 0 }}
-                        >
-                          {getTableHeaders().map((h, i) => (
-                            <td
-                              key={i}
-                              className={
-                                isInventoryUser
-                                  ? "px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 whitespace-normal break-words min-w-[140px] text-center"
-                                  : "px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 max-w-xs truncate text-center"
-                              }
-                              title={String(renderCellForHeader(mapping, h) || '')}
-                            >
-                              {renderCellForHeader(mapping, h)}
-                            </td>
-                          ))}
-                          <td className="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm w-[120px] sticky right-0 bg-white shadow-[-6px_0_10px_rgba(7,26,44,0.06)]">
-                            <div className="flex items-center gap-1.5">
-                              {isActionableRegion(mapping.region) ? (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleViewMapping(mapping)}
-                                    className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#0A2D55]/15 text-[#0A2D55] hover:bg-[#0A2D55]/5 transition"
-                                    title="View"
-                                    aria-label="View"
-                                  >
-                                    <Eye size={15} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => onEditMapping(mapping)}
-                                    className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#F2C94C]/40 text-[#8B6F1C] hover:bg-[#F2C94C]/15 transition"
-                                    title="Edit"
-                                    aria-label="Edit"
-                                  >
-                                    <Pencil size={15} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleOpenDeleteModal(mapping)}
-                                    className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-red-200 text-red-600 hover:bg-red-50 transition"
-                                    title="Delete"
-                                    aria-label="Delete"
-                                  >
-                                    <Trash2 size={15} />
-                                  </button>
-                                </>
-                              ) : (
-                                <span className="text-xs text-[#0A2D55]/40">—</span>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-6 overflow-x-auto">
+                  <div className="mb-3">
+                    <div className="-mx-3 px-3 py-2 overflow-x-auto scrollbar-thin">
+                  <div className="flex items-center gap-3 min-w-max">
+                    {APPROVED_SUBTABS.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => { setApprovedSubTab(t.id); setCurrentPage(1); }}
+                        className={cn(
+                          'px-2.5 py-1 rounded-md text-xs font-semibold whitespace-nowrap',
+                          approvedSubTab === t.id ? 'bg-[#0A2D55] text-white shadow-sm' : 'bg-white/10 text-[#0A2D55] hover:bg-white/20'
+                        )}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+              </div>
 
-                {/* Mobile Card View */}
-                <div className="sm:hidden space-y-3 p-3 sm:p-4 max-h-[60vh] overflow-y-auto hide-scrollbar">
-                  {paginatedMappings.map((mapping, idx) => (
-                    <div 
-                      key={idx} 
-                      className="bg-[#0A2D55]/5 border border-[#0A2D55]/15 rounded-xl p-4 space-y-3 fade-in-up"
-                      style={{ 
-                        animationDelay: `${idx * 100 + 400}ms`,
-                        opacity: 0
-                      }}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
+              {filteredMappings.length === 0 ? (
+                <div className="p-8 sm:p-12 text-center animate-section-2">
+                  <MapIcon className="w-12 h-12 sm:w-16 sm:h-16 text-[#0A2D55]/30 mx-auto mb-4" />
+                  <p className="text-[#0A2D55]/70 text-sm sm:text-lg">
+                    {searchQuery ? 'No mappings found matching your search.' : 'No mappings yet. Create your first mapping to get started.'}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="hidden sm:block overflow-x-auto" ref={approvedContainerRef}>
+                    <table className={isInventoryUser ? "w-full table-auto min-w-[1600px]" : "w-full table-fixed"}>
+                      <thead className="bg-[#0A2D55]/5 border-b border-[#0A2D55]/15">
+                        <tr>
+                          {getTableHeaders().map((h, idx) => (
+                            <th key={idx} className={isInventoryUser ? "px-3 sm:px-4 py-2 text-left text-[10px] sm:text-xs font-semibold text-[#0A2D55] normal-case leading-snug whitespace-normal break-words min-w-[120px]" : "px-3 sm:px-4 py-2 text-left text-[10px] sm:text-xs font-semibold text-[#0A2D55] normal-case leading-snug"}>{h}</th>
+                          ))}
+                          <th className="px-3 sm:px-4 py-2 text-left text-[10px] sm:text-xs font-semibold text-[#0A2D55] normal-case w-[120px] sticky right-0 bg-[#F4F7FA] shadow-[-6px_0_10px_rgba(7,26,44,0.06)]">ACTIONS</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {paginatedMappings.map((mapping, idx) => (
+                          <tr key={idx} className="border-b border-[#0A2D55]/10 hover:bg-[#F2C94C]/5 transition fade-in-up" style={{ animationDelay: `${idx * 100 + 400}ms`, opacity: 0 }}>
+                            {getTableHeaders().map((h, i) => (
+                              <td key={i} className={isInventoryUser ? "px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 whitespace-normal break-words min-w-[140px] text-center" : "px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 max-w-xs truncate text-center"} title={String(renderCellForHeader(mapping, h) || '')}>{renderCellForHeader(mapping, h)}</td>
+                            ))}
+                            <td className="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm w-[120px] sticky right-0 bg-white shadow-[-6px_0_10px_rgba(7,26,44,0.06)]">
+                              <div className="flex items-center gap-1.5">
+                                {isActionableRegion(mapping.region) ? (
+                                  <>
+                                    <button type="button" onClick={() => handleViewMapping(mapping)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#0A2D55]/15 text-[#0A2D55] hover:bg-[#0A2D55]/5 transition" title="View" aria-label="View"><Eye size={15} /></button>
+                                    <button type="button" onClick={() => onEditMapping(mapping)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#F2C94C]/40 text-[#8B6F1C] hover:bg-[#F2C94C]/15 transition" title="Edit" aria-label="Edit"><Pencil size={15} /></button>
+                                    <button type="button" onClick={() => handleOpenDeleteModal(mapping)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-red-200 text-red-600 hover:bg-red-50 transition" title="Delete" aria-label="Delete"><Trash2 size={15} /></button>
+                                  </>
+                                ) : (
+                                  <span className="text-xs text-[#0A2D55]/40">—</span>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="sm:hidden space-y-3 p-3 sm:p-4 max-h-[60vh] overflow-y-auto hide-scrollbar">
+                    {paginatedMappings.map((mapping, idx) => (
+                      <div key={idx} className="bg-[#0A2D55]/5 border border-[#0A2D55]/15 rounded-xl p-4 space-y-3 fade-in-up" style={{ animationDelay: `${idx * 100 + 400}ms`, opacity: 0 }}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
                             <p className="text-xs text-[#0A2D55]/60 font-medium">SURVEY NUMBER</p>
                             <p className="text-sm font-bold text-[#0A2D55] truncate">{displayValue(mapping.surveyNumber)}</p>
+                          </div>
                         </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <p className="text-xs text-[#0A2D55]/60 font-medium">REGION</p>
+                            <p className="text-xs text-[#0A2D55]/90 truncate">{displayValue(mapping.region)}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-[#0A2D55]/60 font-medium">AREA (HA)</p>
+                            <p className="text-xs text-[#0A2D55]/90 font-mono">{formatAreaValue(mapping.totalArea)}</p>
+                          </div>
+                        </div>
                         <div>
-                          <p className="text-xs text-[#0A2D55]/60 font-medium">REGION</p>
-                          <p className="text-xs text-[#0A2D55]/90 truncate">{displayValue(mapping.region)}</p>
+                          <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">Province</p>
+                          <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(mapping.province)}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-[#0A2D55]/60 font-medium">AREA (HA)</p>
-                          <p className="text-xs text-[#0A2D55]/90 font-mono">{formatAreaValue(mapping.totalArea)}</p>
+                          <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">Municipality/ies</p>
+                          <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(getMunicipalities(mapping) || '')}</p>
                         </div>
-                      </div>
-                      <div>
-                        <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">Province</p>
-                        <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(mapping.province)}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">Municipality/ies</p>
-                        <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(getMunicipalities(mapping) || '')}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">Barangay/s</p>
-                        <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(getBarangays(mapping) || '')}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">ICCS/IPS</p>
-                        <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(mapping.icc?.join(', '))}</p>
-                      </div>
-                      {displayValue(mapping.remarks) !== '-' && (
                         <div>
-                          <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">Remarks</p>
-                          <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(mapping.remarks)}</p>
+                          <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">Barangay/s</p>
+                          <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(getBarangays(mapping) || '')}</p>
                         </div>
-                      )}
-                      <div className="flex items-center gap-2 pt-1">
-                        <button
-                          type="button"
-                          onClick={() => handleViewMapping(mapping)}
-                          className="w-8 h-8 inline-flex items-center justify-center rounded-md border border-[#0A2D55]/15 text-[#0A2D55] text-xs hover:bg-[#0A2D55]/5 transition"
-                          title="View"
-                          aria-label="View"
-                        >
-                          <Eye size={16} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onEditMapping(mapping)}
-                          className="w-8 h-8 inline-flex items-center justify-center rounded-md border border-[#F2C94C]/40 text-[#8B6F1C] text-xs hover:bg-[#F2C94C]/15 transition"
-                          title="Edit"
-                          aria-label="Edit"
-                        >
-                          <Pencil size={16} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenDeleteModal(mapping)}
-                          className="w-8 h-8 inline-flex items-center justify-center rounded-md border border-red-200 text-red-600 text-xs hover:bg-red-50 transition"
-                          title="Delete"
-                          aria-label="Delete"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        <div>
+                          <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">ICCS/IPS</p>
+                          <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(mapping.icc?.join(', '))}</p>
+                        </div>
+                        {displayValue(mapping.remarks) !== '-' && (
+                          <div>
+                            <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">Remarks</p>
+                            <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(mapping.remarks)}</p>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2 pt-1">
+                          <button type="button" onClick={() => handleViewMapping(mapping)} className="w-8 h-8 inline-flex items-center justify-center rounded-md border border-[#0A2D55]/15 text-[#0A2D55] text-xs hover:bg-[#0A2D55]/5 transition" title="View" aria-label="View"><Eye size={16} /></button>
+                          <button type="button" onClick={() => onEditMapping(mapping)} className="w-8 h-8 inline-flex items-center justify-center rounded-md border border-[#F2C94C]/40 text-[#8B6F1C] text-xs hover:bg-[#F2C94C]/15 transition" title="Edit" aria-label="Edit"><Pencil size={16} /></button>
+                          <button type="button" onClick={() => handleOpenDeleteModal(mapping)} className="w-8 h-8 inline-flex items-center justify-center rounded-md border border-red-200 text-red-600 text-xs hover:bg-red-50 transition" title="Delete" aria-label="Delete"><Trash2 size={16} /></button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
 
-                {/* Pagination Controls */}
-                <div className="flex items-center justify-between px-4 sm:px-6 py-4 sm:py-5 border-t border-[#0A2D55]/10 bg-[#0A2D55]/2">
-                  {activeTab === 'ongoing' ? (
-                    <>
-                      <div className="text-xs sm:text-sm text-[#0A2D55]/70 font-medium">
-                        Showing <span className="font-bold text-[#0A2D55]">{ongoingStart + 1}</span> to <span className="font-bold text-[#0A2D55]">{Math.min(ongoingEnd, (ongoingRecords || []).length)}</span> of <span className="font-bold text-[#0A2D55]">{(ongoingRecords || []).length}</span> records
-                      </div>
-                      <div className="flex items-center gap-2 sm:gap-3">
-                        <button
-                          onClick={() => setCurrentPage(currentPage - 1)}
-                          disabled={currentPage <= 1}
-                          className={cn(
-                            'flex items-center justify-center gap-1 px-2.5 sm:px-4 py-2 rounded-lg font-semibold text-xs sm:text-sm transition',
-                            currentPage > 1
-                              ? 'bg-[#0A2D55] text-white hover:bg-[#0C3B6E] active:scale-95 shadow-md'
-                              : 'bg-[#0A2D55]/20 text-[#0A2D55]/50 cursor-not-allowed'
-                          )}
-                          aria-label="Previous page"
-                        >
-                          <span className="sm:hidden">←</span>
-                          <span className="hidden sm:inline">← Previous</span>
-                        </button>
-                        <div className="text-xs sm:text-sm text-[#0A2D55] font-semibold px-2 py-1">
-                          Page <span className="text-[#F2C94C]">{currentPage}</span> of <span className="text-[#F2C94C]">{ongoingTotalPages || 1}</span>
-                        </div>
-                        <button
-                          onClick={() => setCurrentPage(currentPage + 1)}
-                          disabled={currentPage >= ongoingTotalPages}
-                          className={cn(
-                            'flex items-center justify-center gap-1 px-2.5 sm:px-4 py-2 rounded-lg font-semibold text-xs sm:text-sm transition',
-                            currentPage < ongoingTotalPages
-                              ? 'bg-[#0A2D55] text-white hover:bg-[#0C3B6E] active:scale-95 shadow-md'
-                              : 'bg-[#0A2D55]/20 text-[#0A2D55]/50 cursor-not-allowed'
-                          )}
-                          aria-label="Next page"
-                        >
-                          <span className="hidden sm:inline">Next →</span>
-                          <span className="sm:hidden">→</span>
-                        </button>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="text-xs sm:text-sm text-[#0A2D55]/70 font-medium">
-                        Showing <span className="font-bold text-[#0A2D55]">{startIndex + 1}</span> to <span className="font-bold text-[#0A2D55]">{Math.min(endIndex, filteredMappings.length)}</span> of <span className="font-bold text-[#0A2D55]">{filteredMappings.length}</span> records
-                      </div>
-                      <div className="flex items-center gap-2 sm:gap-3">
-                        <button
-                          onClick={() => setCurrentPage(currentPage - 1)}
-                          disabled={!canGoPrevious}
-                          className={cn(
-                            'flex items-center justify-center gap-1 px-2.5 sm:px-4 py-2 rounded-lg font-semibold text-xs sm:text-sm transition',
-                            canGoPrevious
-                              ? 'bg-[#0A2D55] text-white hover:bg-[#0C3B6E] active:scale-95 shadow-md'
-                              : 'bg-[#0A2D55]/20 text-[#0A2D55]/50 cursor-not-allowed'
-                          )}
-                          aria-label="Previous page"
-                        >
-                          <span className="sm:hidden">←</span>
-                          <span className="hidden sm:inline">← Previous</span>
-                        </button>
-                        <div className="text-xs sm:text-sm text-[#0A2D55] font-semibold px-2 py-1">
-                          Page <span className="text-[#F2C94C]">{currentPage}</span> of <span className="text-[#F2C94C]">{totalPages || 1}</span>
-                        </div>
-                        <button
-                          onClick={() => setCurrentPage(currentPage + 1)}
-                          disabled={!canGoNext}
-                          className={cn(
-                            'flex items-center justify-center gap-1 px-2.5 sm:px-4 py-2 rounded-lg font-semibold text-xs sm:text-sm transition',
-                            canGoNext
-                              ? 'bg-[#0A2D55] text-white hover:bg-[#0C3B6E] active:scale-95 shadow-md'
-                              : 'bg-[#0A2D55]/20 text-[#0A2D55]/50 cursor-not-allowed'
-                          )}
-                          aria-label="Next page"
-                        >
-                          <span className="sm:hidden">→</span>
-                          <span className="hidden sm:inline">Next →</span>
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
+                  <div className="flex items-center justify-between px-4 sm:px-6 py-4 sm:py-5 border-t border-[#0A2D55]/10 bg-[#0A2D55]/2">
+                    <div className="text-xs sm:text-sm text-[#0A2D55]/70 font-medium">
+                      Showing <span className="font-bold text-[#0A2D55]">{startIndex + 1}</span> to <span className="font-bold text-[#0A2D55]">{Math.min(endIndex, filteredMappings.length)}</span> of <span className="font-bold text-[#0A2D55]">{filteredMappings.length}</span> records
+                    </div>
+                    <div className="flex items-center gap-2 sm:gap-3">
+                      <button onClick={() => setCurrentPage(currentPage - 1)} disabled={!canGoPrevious} className={cn('flex items-center justify-center gap-1 px-2.5 sm:px-4 py-2 rounded-lg font-semibold text-xs sm:text-sm transition', canGoPrevious ? 'bg-[#0A2D55] text-white hover:bg-[#0C3B6E] active:scale-95 shadow-md' : 'bg-[#0A2D55]/20 text-[#0A2D55]/50 cursor-not-allowed')} aria-label="Previous page">
+                        <span className="sm:hidden">←</span>
+                        <span className="hidden sm:inline">← Previous</span>
+                      </button>
+                      <div className="text-xs sm:text-sm text-[#0A2D55] font-semibold px-2 py-1">Page <span className="text-[#F2C94C]">{currentPage}</span> of <span className="text-[#F2C94C]">{totalPages || 1}</span></div>
+                      <button onClick={() => setCurrentPage(currentPage + 1)} disabled={!canGoNext} className={cn('flex items-center justify-center gap-1 px-2.5 sm:px-4 py-2 rounded-lg font-semibold text-xs sm:text-sm transition', canGoNext ? 'bg-[#0A2D55] text-white hover:bg-[#0C3B6E] active:scale-95 shadow-md' : 'bg-[#0A2D55]/20 text-[#0A2D55]/50 cursor-not-allowed')} aria-label="Next page">
+                        <span className="sm:hidden">→</span>
+                        <span className="hidden sm:inline">Next →</span>
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         )}
 
