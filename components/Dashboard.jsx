@@ -2485,6 +2485,15 @@ export function Dashboard({
     }, 200);
   };
 
+  const handleNoPendingAction = (action) => {
+    try {
+      setAlertTick((t) => t + 1);
+      setAlert({ type: 'info', message: `No pending mapping to ${action}.` });
+    } catch (e) {
+      // ignore
+    }
+  };
+
   const handleOpenDeleteModal = (mapping) => {
     setDeleteTarget(mapping);
     setShowDeleteModal(true);
@@ -3062,6 +3071,24 @@ export function Dashboard({
                     </button>
                   )}
                 </div>
+                <div className="w-full sm:w-[200px]">
+                  <Select
+                    value={remarksFilter}
+                    onValueChange={(value) => {
+                      setRemarksFilter(value);
+                      setCurrentPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="w-full bg-white border-2 border-[#0A2D55]/10 rounded-xl px-4 py-2.5 text-sm text-[#0A2D55] hover:border-[#F2C94C]/40 focus:ring-[#F2C94C]/40 shadow-sm">
+                      <SelectValue placeholder="All Remarks" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white border-[#0A2D55]/10 rounded-xl shadow-2xl">
+                      {remarksOptions.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
 
@@ -3168,17 +3195,42 @@ export function Dashboard({
                                 {PENDING_REGION_HEADERS.map((h, i) => (
                                   <th key={i} title={h} className="px-3 sm:px-4 py-2 text-left text-[11px] sm:text-[12px] font-semibold text-[#0A2D55] normal-case leading-snug whitespace-nowrap truncate max-w-[220px]">{h}</th>
                                 ))}
+                                <th className="px-3 sm:px-4 py-2 text-left text-[10px] sm:text-xs font-semibold text-[#0A2D55] normal-case w-[120px] sticky right-0 z-20 bg-[#F4F7FA] shadow-[-6px_0_10px_rgba(7,26,44,0.06)]">ACTIONS</th>
                               </tr>
                             </thead>
                             <tbody>
                               {paginatedPending.length === 0 ? (
-                                <tr><td colSpan={PENDING_REGION_HEADERS.length} className="px-4 sm:px-6 py-6 text-center text-[#0A2D55]/60">No pending items.</td></tr>
+                                <tr className="border-b border-[#0A2D55]/10">
+                                  {PENDING_REGION_HEADERS.map((h, j) => (
+                                    <td key={j} className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal text-center" aria-hidden>—</td>
+                                  ))}
+                                  <td className="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm w-[120px] sticky right-0 z-10 bg-white shadow-[-6px_0_10px_rgba(7,26,44,0.06)]">
+                                    <div className="flex items-center gap-1.5 justify-end">
+                                      <button type="button" onClick={() => handleNoPendingAction('view')} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#0A2D55]/15 text-[#0A2D55] hover:bg-[#0A2D55]/5 transition cursor-pointer" title="View"><Eye size={15} className="text-[#0A2D55]" /></button>
+                                      <button type="button" onClick={() => handleNoPendingAction('edit')} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#F2C94C]/40 text-[#8B6F1C] hover:bg-[#F2C94C]/15 transition cursor-pointer" title="Edit"><Pencil size={15} className="text-[#8B6F1C]" /></button>
+                                      <button type="button" onClick={() => handleNoPendingAction('delete')} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-red-200 text-red-600 hover:bg-red-50 transition cursor-pointer" title="Delete"><Trash2 size={15} className="text-red-600" /></button>
+                                    </div>
+                                  </td>
+                                </tr>
                               ) : (
                                 paginatedPending.map((mapping, idx) => (
                                   <tr key={mapping.controlNumber || mapping.surveyNumber || idx} className="border-b border-[#0A2D55]/10">
                                     {PENDING_REGION_HEADERS.map((h, j) => (
                                       <td key={j} className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal" title={String(renderCellForHeader(mapping, h) || '')}>{renderCellForHeader(mapping, h)}</td>
                                     ))}
+                                    <td className="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm w-[120px] sticky right-0 z-10 bg-white shadow-[-6px_0_10px_rgba(7,26,44,0.06)]">
+                                      <div className="flex items-center gap-1.5">
+                                        {isActionableRegion(mapping.region) ? (
+                                          <>
+                                            <button type="button" onClick={() => handleViewMapping(mapping)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#0A2D55]/15 text-[#0A2D55] hover:bg-[#0A2D55]/5 transition" title="View" aria-label="View"><Eye size={15} /></button>
+                                            <button type="button" onClick={() => onEditMapping(mapping)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#F2C94C]/40 text-[#8B6F1C] hover:bg-[#F2C94C]/15 transition" title="Edit" aria-label="Edit"><Pencil size={15} /></button>
+                                            <button type="button" onClick={() => handleOpenDeleteModal(mapping)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-red-200 text-red-600 hover:bg-red-50 transition" title="Delete" aria-label="Delete"><Trash2 size={15} /></button>
+                                          </>
+                                        ) : (
+                                          <span className="text-xs text-[#0A2D55]/40">—</span>
+                                        )}
+                                      </div>
+                                    </td>
                                   </tr>
                                 ))
                               )}
@@ -3189,6 +3241,27 @@ export function Dashboard({
                     }
 
                     // Default: fallback list view for other pending subtabs
+                    if (!paginatedPending || paginatedPending.length === 0) {
+                      return (
+                        <div className="mt-3">
+                          <div className="border border-[#0A2D55]/10 rounded-lg p-3 flex items-center justify-between">
+                            <div className="min-w-0">
+                              <div className="text-sm font-bold text-[#0A2D55] truncate">—</div>
+                              <div className="text-xs text-[#0A2D55]/60 truncate">No region</div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="text-xs text-[#0A2D55]/60 mr-2">—</div>
+                              <div className="flex items-center gap-1">
+                                <button type="button" onClick={() => handleNoPendingAction('view')} className="w-8 h-8 inline-flex items-center justify-center rounded-md border border-[#0A2D55]/15 text-[#0A2D55] text-xs hover:bg-[#0A2D55]/5 transition" title="View"><Eye size={16} /></button>
+                                <button type="button" onClick={() => handleNoPendingAction('edit')} className="w-8 h-8 inline-flex items-center justify-center rounded-md border border-[#F2C94C]/40 text-[#8B6F1C] text-xs hover:bg-[#F2C94C]/15 transition" title="Edit"><Pencil size={16} /></button>
+                                <button type="button" onClick={() => handleNoPendingAction('delete')} className="w-8 h-8 inline-flex items-center justify-center rounded-md border border-red-200 text-red-600 text-xs hover:bg-red-50 transition" title="Delete"><Trash2 size={16} /></button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+
                     return (
                       <div className="mt-3 space-y-2">
                         {paginatedPending.map((m, idx) => (
@@ -3197,7 +3270,20 @@ export function Dashboard({
                               <div className="text-sm font-bold text-[#0A2D55] truncate">{m.surveyNumber || m.controlNumber || m.control_number || '—'}</div>
                               <div className="text-xs text-[#0A2D55]/60 truncate">{m.region || m.province || ''}</div>
                             </div>
-                            <div className="text-xs text-[#0A2D55]/60">{m.remarks ? 'Has remarks' : ''}</div>
+                            <div className="flex items-center gap-2">
+                              <div className="text-xs text-[#0A2D55]/60 mr-2">{m.remarks ? 'Has remarks' : ''}</div>
+                              <div className="flex items-center gap-1">
+                                {isActionableRegion(m.region) ? (
+                                  <>
+                                    <button type="button" onClick={() => handleViewMapping(m)} className="w-8 h-8 inline-flex items-center justify-center rounded-md border border-[#0A2D55]/15 text-[#0A2D55] text-xs hover:bg-[#0A2D55]/5 transition" title="View" aria-label="View"><Eye size={16} /></button>
+                                    <button type="button" onClick={() => onEditMapping(m)} className="w-8 h-8 inline-flex items-center justify-center rounded-md border border-[#F2C94C]/40 text-[#8B6F1C] text-xs hover:bg-[#F2C94C]/15 transition" title="Edit" aria-label="Edit"><Pencil size={16} /></button>
+                                    <button type="button" onClick={() => handleOpenDeleteModal(m)} className="w-8 h-8 inline-flex items-center justify-center rounded-md border border-red-200 text-red-600 text-xs hover:bg-red-50 transition" title="Delete" aria-label="Delete"><Trash2 size={16} /></button>
+                                  </>
+                                ) : (
+                                  <span className="text-xs text-[#0A2D55]/40">—</span>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -3455,6 +3541,24 @@ export function Dashboard({
                       ✕
                     </button>
                   )}
+                </div>
+                <div className="w-full sm:w-[200px]">
+                  <Select
+                    value={remarksFilter}
+                    onValueChange={(value) => {
+                      setRemarksFilter(value);
+                      setCurrentPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="w-full bg-white border-2 border-[#0A2D55]/10 rounded-xl px-4 py-2.5 text-sm text-[#0A2D55] hover:border-[#F2C94C]/40 focus:ring-[#F2C94C]/40 shadow-sm">
+                      <SelectValue placeholder="All Remarks" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white border-[#0A2D55]/10 rounded-xl shadow-2xl">
+                      {remarksOptions.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             </div>
