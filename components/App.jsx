@@ -247,7 +247,18 @@ export function App() {
         _ongoing: Boolean((formData && formData._ongoing) || (addMappingContext && addMappingContext.ongoing)),
       };
 
-      
+      // Preserve any raw_fields submitted by specialized forms (e.g. Pending-mode)
+      if (formData && formData.raw_fields && typeof formData.raw_fields === 'object') {
+        newMapping.raw_fields = { ...formData.raw_fields };
+      }
+
+      // Mark as pending if the add context, form, or selected collection requested it
+      newMapping._pending = Boolean(
+        (formData && formData._pending) ||
+        (addMappingContext && addMappingContext.pending) ||
+        String(selectedCollection || '').toLowerCase().includes('pending')
+      );
+
 
       // Debug: show the final mapping object that will be saved/updated
       try {
@@ -562,6 +573,9 @@ export function App() {
                 (addMappingContext && addMappingContext.ongoing) ||
                 (editingMapping && (editingMapping._ongoing === true || String(editingMapping.importCollection || '').toLowerCase().includes('ongoing')))
               )}
+              // Enable pendingMode when opening from the Pending tab or when the
+              // currently selected collection appears to be a pending import.
+              pendingMode={Boolean((addMappingContext && addMappingContext.pending) || String(selectedCollection || '').toLowerCase().includes('pending'))}
               // Lock region when opened from a region subtab or when editing a mapping (use mapping.region)
               fixedRegion={
                 (editingMapping && (editingMapping.region || null)) ||

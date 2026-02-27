@@ -59,7 +59,7 @@ function Dashboard({
   const [fabRightPx, setFabRightPx] = useState(32);
   const [ongoingSubTab, setOngoingSubTab] = useState('summary');
   const [pendingSubTab, setPendingSubTab] = useState('summary');
-  const [approvedSubTab, setApprovedSubTab] = useState('car');
+  const [approvedSubTab, setApprovedSubTab] = useState('summary');
 
   const [showViewModal, setShowViewModal] = useState(false);
   const [isClosingViewModal, setIsClosingViewModal] = useState(false);
@@ -338,7 +338,28 @@ function Dashboard({
   ];
   const DEFAULT_TABLE_HEADERS = ['SURVEY NUMBER', 'REGION', 'PROVINCE', 'MUNICIPALITY/IES', 'BARANGAY/S', 'AREA (HA)', 'ICCS/IPS', 'REMARKS', 'ACTIONS'];
 
-  const getTableHeaders = () => (isInventoryUser ? NCIP_TABLE_HEADERS : DEFAULT_TABLE_HEADERS);
+  const APPROVED_SUMMARY_HEADERS = [
+    'Region',
+    'Mining/ Mineral Processing Projects',
+    'Energy Projects',
+    'DAM Projects',
+    'EPR',
+    'Quarry Projects',
+    'Agro-Industrial & Tourism Project (Agro-Industrial: Plantation & Livelihood project and Tourism Project)',
+    'Infrastructure Projects (Telecommunication, Irrigation project, Water System, Road and Bridge Project)',
+    'Other Projects: (Bioprospecting, Feasibility Studies, Research, Treasure Hunting & Tree Cutting Activities)',
+    'TOTAL APPROVED CPs',
+    'TOTAL PROJECT COST',
+  ];
+
+  const getTableHeaders = () => {
+    // When viewing the Approved tab and the first subtab (Summary) is active,
+    // show the approved-summary headers.
+    if (!isInventoryUser && activeTab === 'mappings' && String(approvedSubTab || '').toLowerCase() === 'summary') {
+      return APPROVED_SUMMARY_HEADERS;
+    }
+    return isInventoryUser ? NCIP_TABLE_HEADERS : DEFAULT_TABLE_HEADERS;
+  };
 
   const renderCellForHeader = (mapping, header) => {
     const h = String(header || '').toLowerCase();
@@ -524,6 +545,7 @@ function Dashboard({
 
   // Approved subtabs: only regions + extractive company lists as requested
   const APPROVED_SUBTABS = [
+    { id: 'summary', label: 'Summary' },
     { id: 'car', label: 'CAR' },
     { id: 'region1', label: 'Region 1' },
     { id: 'region2', label: 'Region 2' },
@@ -948,6 +970,7 @@ function Dashboard({
   // treat all loaded mappings as ongoing (the background tagging may not have
   // completed yet). Otherwise, filter by explicit ongoing flags/import markers.
   const isSelectedCollectionOngoing = selectedCollection && String(selectedCollection).toLowerCase().includes('ongoing');
+  const isSelectedCollectionPending = selectedCollection && String(selectedCollection).toLowerCase().includes('pending');
   const ongoingRecords = Array.isArray(mappings)
     ? (isSelectedCollectionOngoing ? mappings : mappings.filter((m) => isOngoingMapping(m)))
     : [];
@@ -1592,16 +1615,22 @@ function Dashboard({
     }
     if (remarksFilter === 'with' && String(mapping.remarks || '').trim() === '') return false;
     if (remarksFilter === 'none' && String(mapping.remarks || '').trim() !== '') return false;
+    const safe = (v) => {
+      if (v === null || typeof v === 'undefined') return '';
+      if (Array.isArray(v)) return v.join(', ');
+      return String(v);
+    };
+
     return (
-      mapping.surveyNumber?.toLowerCase().includes(query) ||
-      mapping.region?.toLowerCase().includes(query) ||
-      mapping.province?.toLowerCase().includes(query) ||
-      mapping.municipality?.toLowerCase().includes(query) ||
-      mapping.municipalities?.join(', ').toLowerCase().includes(query) ||
-      mapping.barangays?.join(', ').toLowerCase().includes(query) ||
-      mapping.icc?.join(', ').toLowerCase().includes(query) ||
-      mapping.remarks?.toLowerCase().includes(query) ||
-      String(mapping.proponent || mapping.applicant || mapping.applicantProponent || mapping.nameOfProject || mapping.projectName || '').toLowerCase().includes(query)
+      safe(mapping.surveyNumber).toLowerCase().includes(query) ||
+      safe(mapping.region).toLowerCase().includes(query) ||
+      safe(mapping.province).toLowerCase().includes(query) ||
+      safe(mapping.municipality).toLowerCase().includes(query) ||
+      safe(mapping.municipalities).toLowerCase().includes(query) ||
+      safe(mapping.barangays).toLowerCase().includes(query) ||
+      safe(mapping.icc).toLowerCase().includes(query) ||
+      safe(mapping.remarks).toLowerCase().includes(query) ||
+      safe(mapping.proponent || mapping.applicant || mapping.applicantProponent || mapping.nameOfProject || mapping.projectName).toLowerCase().includes(query)
     );
   });
 
@@ -1624,8 +1653,107 @@ function Dashboard({
   const ongoingEnd = ongoingStart + itemsPerPage;
   const paginatedOngoing = Array.isArray(filteredOngoingRecords) ? filteredOngoingRecords.slice(ongoingStart, ongoingEnd) : [];
 
+  // Approved Summary aggregation helper
+  const computeApprovedSummaryRows = (mappings) => {
+    if (!Array.isArray(mappings)) return [];
+    const regionMap = {};
+
+    const parseCost = (raw) => {
+      if (raw === null || typeof raw === 'undefined') return 0;
+      try {
+        const s = String(raw || '').replace(/[^0-9.\-]/g, '');
+        if (!s) return 0;
+        const n = parseFloat(s);
+        return Number.isFinite(n) ? n : 0;
+      } catch (e) { return 0; }
+    };
+
+    const getTypeString = (m) => {
+      try {
+        // prefer raw_fields variants, then fall back to rendered value
+        if (m && m.raw_fields) {
+          const rf = m.raw_fields;
+          const candidates = ['Type of project', 'typeOfProject', 'type_of_project', 'type', 'natureOfProject', 'nature', 'projectType'];
+          for (const c of candidates) {
+            if (Object.prototype.hasOwnProperty.call(rf, c) && rf[c]) return String(rf[c]);
+            if (Object.prototype.hasOwnProperty.call(rf, c.toLowerCase()) && rf[c.toLowerCase()]) return String(rf[c.toLowerCase()]);
+          }
+        }
+      } catch (e) { }
+      try { return String(renderCellForHeader(m, 'Type of project') || ''); } catch (e) { return ''; }
+    };
+
+    const getRegionString = (m) => {
+      try {
+        if (m && m.region) return String(m.region);
+        if (m && m.raw_fields) {
+          const rf = m.raw_fields;
+          if (rf.region) return String(rf.region);
+          const keys = Object.keys(rf || {});
+          const k = keys.find(k => String(k).toLowerCase().includes('region'));
+          if (k) return String(rf[k]);
+        }
+      } catch (e) { }
+      return 'Unknown';
+    };
+
+    for (const m of mappings) {
+      const region = String(getRegionString(m) || 'Unknown').trim() || 'Unknown';
+      if (!Object.prototype.hasOwnProperty.call(regionMap, region)) {
+        regionMap[region] = { mining: 0, energy: 0, dam: 0, epr: 0, quarry: 0, agro: 0, infra: 0, other: 0, total: 0, cost: 0 };
+      }
+      const row = regionMap[region];
+      const typeRaw = String(getTypeString(m) || '').toLowerCase();
+      const costRaw = (m && m.raw_fields && (m.raw_fields['Project Cost'] || m.raw_fields['project_cost'] || m.raw_fields['project cost'])) || m['Project Cost'] || m.projectCost || '';
+      const cost = parseCost(costRaw);
+
+      let matched = false;
+      if (/mining|mineral/.test(typeRaw)) { row.mining += 1; matched = true; }
+      else if (/energy|power|solar|wind|geothermal|hydro/.test(typeRaw)) { row.energy += 1; matched = true; }
+      else if (/dam/.test(typeRaw)) { row.dam += 1; matched = true; }
+      else if (/\bepr\b|environmental/.test(typeRaw)) { row.epr += 1; matched = true; }
+      else if (/quarry/.test(typeRaw)) { row.quarry += 1; matched = true; }
+      else if (/agro|plantation|livelihood|tourism/.test(typeRaw)) { row.agro += 1; matched = true; }
+      else if (/infrastructure|road|bridge|irrigation|telecom|water|telecommunication/.test(typeRaw)) { row.infra += 1; matched = true; }
+      else { row.other += 1; }
+
+      row.total += 1;
+      row.cost += Number(cost || 0);
+    }
+
+    const rows = Object.keys(regionMap).sort((a, b) => a.localeCompare(b)).map((region) => ({ Region: region, ...regionMap[region] }));
+    // totals row
+    const totals = rows.reduce((acc, r) => {
+      acc.mining += r.mining; acc.energy += r.energy; acc.dam += r.dam; acc.epr += r.epr; acc.quarry += r.quarry; acc.agro += r.agro; acc.infra += r.infra; acc.other += r.other; acc.total += r.total; acc.cost += r.cost; return acc;
+    }, { Region: 'TOTAL', mining: 0, energy: 0, dam: 0, epr: 0, quarry: 0, agro: 0, infra: 0, other: 0, total: 0, cost: 0 });
+    rows.push(totals);
+
+    // Map to objects keyed by the header labels so rendering is simple
+    const mapped = rows.map((r) => ({
+      [APPROVED_SUMMARY_HEADERS[0]]: r.Region,
+      [APPROVED_SUMMARY_HEADERS[1]]: r.mining,
+      [APPROVED_SUMMARY_HEADERS[2]]: r.energy,
+      [APPROVED_SUMMARY_HEADERS[3]]: r.dam,
+      [APPROVED_SUMMARY_HEADERS[4]]: r.epr,
+      [APPROVED_SUMMARY_HEADERS[5]]: r.quarry,
+      [APPROVED_SUMMARY_HEADERS[6]]: r.agro,
+      [APPROVED_SUMMARY_HEADERS[7]]: r.infra,
+      [APPROVED_SUMMARY_HEADERS[8]]: r.other,
+      [APPROVED_SUMMARY_HEADERS[9]]: r.total,
+      [APPROVED_SUMMARY_HEADERS[10]]: Number(r.cost || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+    }));
+
+    return mapped;
+  };
+
+  const isApprovedSummaryView = (!isInventoryUser && activeTab === 'mappings' && String(approvedSubTab || '').toLowerCase() === 'summary');
+  const approvedSummaryRows = isApprovedSummaryView ? computeApprovedSummaryRows(filteredMappings) : [];
+  const rowsToRender = isApprovedSummaryView ? approvedSummaryRows : paginatedMappings;
+
   // Pending records (detection by status/_pending/pending flag) with subtabs
-  const pendingRecordsAll = Array.isArray(mappings) ? mappings.filter((m) => isPendingMapping(m)) : [];
+  const pendingRecordsAll = Array.isArray(mappings)
+    ? (isSelectedCollectionPending ? mappings : mappings.filter((m) => isPendingMapping(m)))
+    : [];
 
   const filteredPendingRecords = React.useMemo(() => {
     if (!Array.isArray(pendingRecordsAll)) return [];
@@ -2298,15 +2426,16 @@ function Dashboard({
       // force the import into a dedicated ongoing collection so Approved and
       // Ongoing are stored separately in Firestore.
       let options = { mode, onProgress: (p) => setImportProgress(p), targetTab: activeTab };
-      let forcedOngoingCollection = null;
+      let forcedImportCollection = null;
       try {
-        // If the import was initiated while the user was on the Ongoing tab,
-        // default to creating a dedicated ongoing collection so that uploads
-        // appear only under Ongoing. Apply this behavior for all users.
-        if (activeTab === 'ongoing') {
+        // If the import was initiated while the user was on the Ongoing or Pending tab,
+        // default to creating a dedicated import collection so that uploads appear
+        // only under that tab. For ongoing imports we mark documents as ongoing.
+        if (activeTab === 'ongoing' || activeTab === 'pending') {
           const uid = user?.uid || 'anon';
-          forcedOngoingCollection = `mappings_ongoing_${uid}`;
-          options = { ...options, mode: 'newCollection', collectionName: forcedOngoingCollection, forceOngoing: true };
+          const prefix = activeTab === 'ongoing' ? 'mappings_ongoing_' : 'mappings_pending_';
+          forcedImportCollection = `${prefix}${uid}`;
+          options = { ...options, mode: 'newCollection', collectionName: forcedImportCollection, forceOngoing: activeTab === 'ongoing' };
         }
       } catch (e) {
         // ignore
@@ -2314,9 +2443,9 @@ function Dashboard({
       if (options.mode === 'newCollection') {
         // When creating a new collection, prefer the user-supplied collection name
         // if provided. If no name is supplied and the import was started from
-        // the Ongoing tab, default to the forced ongoing collection name.
-        if (forcedOngoingCollection) {
-          options.collectionName = (collectionName && String(collectionName).trim()) ? String(collectionName).trim() : forcedOngoingCollection;
+        // Ongoing/Pending, default to the forced collection name.
+        if (forcedImportCollection) {
+          options.collectionName = (collectionName && String(collectionName).trim()) ? String(collectionName).trim() : forcedImportCollection;
         } else {
           options.collectionName = collectionName || importCollectionName;
         }
@@ -2328,9 +2457,15 @@ function Dashboard({
       // If we imported into a dedicated ongoing collection, switch UI to show it
       try {
         const col = options && options.collectionName;
-        if (col && String(col).toLowerCase().includes('ongoing')) {
-          setActiveTab('ongoing');
-          if (typeof onSelectCollection === 'function') onSelectCollection(col);
+        if (col) {
+          const lower = String(col).toLowerCase();
+          if (lower.includes('ongoing')) {
+            setActiveTab('ongoing');
+            if (typeof onSelectCollection === 'function') onSelectCollection(col);
+          } else if (lower.includes('pending')) {
+            setActiveTab('pending');
+            if (typeof onSelectCollection === 'function') onSelectCollection(col);
+          }
         }
       } catch (e) {
         // ignore
@@ -3441,23 +3576,27 @@ function Dashboard({
                         </tr>
                       </thead>
                       <tbody>
-                        {paginatedMappings.map((mapping, idx) => (
+                        {rowsToRender.map((mapping, idx) => (
                           <tr key={idx} className="border-b border-[#0A2D55]/10 hover:bg-[#F2C94C]/5 transition fade-in-up" style={{ animationDelay: `${idx * 100 + 400}ms`, opacity: 0 }}>
                             {getTableHeaders().map((h, i) => (
-                              <td key={i} className={isInventoryUser ? "px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 whitespace-normal break-words min-w-[140px] text-center" : "px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 max-w-xs truncate text-center"} title={String(renderCellForHeader(mapping, h) || '')}>{renderCellForHeader(mapping, h)}</td>
+                              <td key={i} className={isInventoryUser ? "px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 whitespace-normal break-words min-w-[140px] text-center" : "px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-[#0A2D55]/80 max-w-xs truncate text-center"} title={String(isApprovedSummaryView ? String(mapping[h] || '') : String(renderCellForHeader(mapping, h) || ''))}>{isApprovedSummaryView ? (mapping[h] ?? '') : renderCellForHeader(mapping, h)}</td>
                             ))}
                             <td className="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm w-[120px] sticky right-0 bg-white shadow-[-6px_0_10px_rgba(7,26,44,0.06)]">
-                              <div className="flex items-center gap-1.5">
-                                {isActionableRegion(mapping.region) ? (
-                                  <>
-                                    <button type="button" onClick={() => handleViewMapping(mapping)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#0A2D55]/15 text-[#0A2D55] hover:bg-[#0A2D55]/5 transition" title="View" aria-label="View"><Eye size={15} /></button>
-                                    <button type="button" onClick={() => onEditMapping(mapping)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#F2C94C]/40 text-[#8B6F1C] hover:bg-[#F2C94C]/15 transition" title="Edit" aria-label="Edit"><Pencil size={15} /></button>
-                                    <button type="button" onClick={() => handleOpenDeleteModal(mapping)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-red-200 text-red-600 hover:bg-red-50 transition" title="Delete" aria-label="Delete"><Trash2 size={15} /></button>
-                                  </>
-                                ) : (
-                                  <span className="text-xs text-[#0A2D55]/40">—</span>
-                                )}
-                              </div>
+                              {isApprovedSummaryView ? (
+                                <div className="text-center text-xs text-[#0A2D55]/60">—</div>
+                              ) : (
+                                <div className="flex items-center gap-1.5">
+                                  {isActionableRegion(mapping.region) ? (
+                                    <>
+                                      <button type="button" onClick={() => handleViewMapping(mapping)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#0A2D55]/15 text-[#0A2D55] hover:bg-[#0A2D55]/5 transition" title="View" aria-label="View"><Eye size={15} /></button>
+                                      <button type="button" onClick={() => onEditMapping(mapping)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#F2C94C]/40 text-[#8B6F1C] hover:bg-[#F2C94C]/15 transition" title="Edit" aria-label="Edit"><Pencil size={15} /></button>
+                                      <button type="button" onClick={() => handleOpenDeleteModal(mapping)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-red-200 text-red-600 hover:bg-red-50 transition" title="Delete" aria-label="Delete"><Trash2 size={15} /></button>
+                                    </>
+                                  ) : (
+                                    <span className="text-xs text-[#0A2D55]/40">—</span>
+                                  )}
+                                </div>
+                              )}
                             </td>
                           </tr>
                         ))}
@@ -3466,52 +3605,105 @@ function Dashboard({
                   </div>
 
                   <div className="sm:hidden space-y-3 p-3 sm:p-4 max-h-[60vh] overflow-y-auto hide-scrollbar">
-                    {paginatedMappings.map((mapping, idx) => (
-                      <div key={idx} className="bg-[#0A2D55]/5 border border-[#0A2D55]/15 rounded-xl p-4 space-y-3 fade-in-up" style={{ animationDelay: `${idx * 100 + 400}ms`, opacity: 0 }}>
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs text-[#0A2D55]/60 font-medium">SURVEY NUMBER</p>
-                            <p className="text-sm font-bold text-[#0A2D55] truncate">{displayValue(mapping.surveyNumber)}</p>
+                    {rowsToRender.map((mapping, idx) => (
+                      isApprovedSummaryView ? (
+                        <div key={idx} className="bg-[#0A2D55]/5 border border-[#0A2D55]/15 rounded-xl p-4 space-y-3 fade-in-up" style={{ animationDelay: `${idx * 100 + 400}ms`, opacity: 0 }}>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs text-[#0A2D55]/60 font-medium">Region</p>
+                              <p className="text-sm font-bold text-[#0A2D55] truncate">{mapping[APPROVED_SUMMARY_HEADERS[0]]}</p>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <p className="text-xs text-[#0A2D55]/60 font-medium">Mining / Mineral</p>
+                              <p className="text-xs text-[#0A2D55]/90">{mapping[APPROVED_SUMMARY_HEADERS[1]]}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-[#0A2D55]/60 font-medium">Energy</p>
+                              <p className="text-xs text-[#0A2D55]/90">{mapping[APPROVED_SUMMARY_HEADERS[2]]}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-[#0A2D55]/60 font-medium">DAM</p>
+                              <p className="text-xs text-[#0A2D55]/90">{mapping[APPROVED_SUMMARY_HEADERS[3]]}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-[#0A2D55]/60 font-medium">EPR</p>
+                              <p className="text-xs text-[#0A2D55]/90">{mapping[APPROVED_SUMMARY_HEADERS[4]]}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-[#0A2D55]/60 font-medium">Quarry</p>
+                              <p className="text-xs text-[#0A2D55]/90">{mapping[APPROVED_SUMMARY_HEADERS[5]]}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-[#0A2D55]/60 font-medium">Agro-Industrial & Tourism</p>
+                              <p className="text-xs text-[#0A2D55]/90">{mapping[APPROVED_SUMMARY_HEADERS[6]]}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-[#0A2D55]/60 font-medium">Infrastructure</p>
+                              <p className="text-xs text-[#0A2D55]/90">{mapping[APPROVED_SUMMARY_HEADERS[7]]}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-[#0A2D55]/60 font-medium">Other</p>
+                              <p className="text-xs text-[#0A2D55]/90">{mapping[APPROVED_SUMMARY_HEADERS[8]]}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-[#0A2D55]/60 font-medium">Total Approved CPs</p>
+                              <p className="text-xs text-[#0A2D55]/90 font-semibold">{mapping[APPROVED_SUMMARY_HEADERS[9]]}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-[#0A2D55]/60 font-medium">Total Project Cost</p>
+                              <p className="text-xs text-[#0A2D55]/90 font-mono">{mapping[APPROVED_SUMMARY_HEADERS[10]]}</p>
+                            </div>
                           </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-2">
+                      ) : (
+                        <div key={idx} className="bg-[#0A2D55]/5 border border-[#0A2D55]/15 rounded-xl p-4 space-y-3 fade-in-up" style={{ animationDelay: `${idx * 100 + 400}ms`, opacity: 0 }}>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs text-[#0A2D55]/60 font-medium">SURVEY NUMBER</p>
+                              <p className="text-sm font-bold text-[#0A2D55] truncate">{displayValue(mapping.surveyNumber)}</p>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <p className="text-xs text-[#0A2D55]/60 font-medium">REGION</p>
+                              <p className="text-xs text-[#0A2D55]/90 truncate">{displayValue(mapping.region)}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-[#0A2D55]/60 font-medium">AREA (HA)</p>
+                              <p className="text-xs text-[#0A2D55]/90 font-mono">{formatAreaValue(mapping.totalArea)}</p>
+                            </div>
+                          </div>
                           <div>
-                            <p className="text-xs text-[#0A2D55]/60 font-medium">REGION</p>
-                            <p className="text-xs text-[#0A2D55]/90 truncate">{displayValue(mapping.region)}</p>
+                            <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">Province</p>
+                            <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(mapping.province)}</p>
                           </div>
                           <div>
-                            <p className="text-xs text-[#0A2D55]/60 font-medium">AREA (HA)</p>
-                            <p className="text-xs text-[#0A2D55]/90 font-mono">{formatAreaValue(mapping.totalArea)}</p>
+                            <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">Municipality/ies</p>
+                            <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(getMunicipalities(mapping) || '')}</p>
                           </div>
-                        </div>
-                        <div>
-                          <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">Province</p>
-                          <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(mapping.province)}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">Municipality/ies</p>
-                          <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(getMunicipalities(mapping) || '')}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">Barangay/s</p>
-                          <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(getBarangays(mapping) || '')}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">ICCS/IPS</p>
-                          <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(mapping.icc?.join(', '))}</p>
-                        </div>
-                        {displayValue(mapping.remarks) !== '-' && (
                           <div>
-                            <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">Remarks</p>
-                            <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(mapping.remarks)}</p>
+                            <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">Barangay/s</p>
+                            <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(getBarangays(mapping) || '')}</p>
                           </div>
-                        )}
-                        <div className="flex items-center gap-2 pt-1">
-                          <button type="button" onClick={() => handleViewMapping(mapping)} className="w-8 h-8 inline-flex items-center justify-center rounded-md border border-[#0A2D55]/15 text-[#0A2D55] text-xs hover:bg-[#0A2D55]/5 transition" title="View" aria-label="View"><Eye size={16} /></button>
-                          <button type="button" onClick={() => onEditMapping(mapping)} className="w-8 h-8 inline-flex items-center justify-center rounded-md border border-[#F2C94C]/40 text-[#8B6F1C] text-xs hover:bg-[#F2C94C]/15 transition" title="Edit" aria-label="Edit"><Pencil size={16} /></button>
-                          <button type="button" onClick={() => handleOpenDeleteModal(mapping)} className="w-8 h-8 inline-flex items-center justify-center rounded-md border border-red-200 text-red-600 text-xs hover:bg-red-50 transition" title="Delete" aria-label="Delete"><Trash2 size={16} /></button>
+                          <div>
+                            <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">ICCS/IPS</p>
+                            <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(mapping.icc?.join(', '))}</p>
+                          </div>
+                          {displayValue(mapping.remarks) !== '-' && (
+                            <div>
+                              <p className="text-xs text-[#0A2D55]/60 font-medium mb-1">Remarks</p>
+                              <p className="text-xs text-[#0A2D55]/90 line-clamp-2">{displayValue(mapping.remarks)}</p>
+                            </div>
+                          )}
+                          <div className="flex items-center gap-2 pt-1">
+                            <button type="button" onClick={() => handleViewMapping(mapping)} className="w-8 h-8 inline-flex items-center justify-center rounded-md border border-[#0A2D55]/15 text-[#0A2D55] text-xs hover:bg-[#0A2D55]/5 transition" title="View" aria-label="View"><Eye size={16} /></button>
+                            <button type="button" onClick={() => onEditMapping(mapping)} className="w-8 h-8 inline-flex items-center justify-center rounded-md border border-[#F2C94C]/40 text-[#8B6F1C] text-xs hover:bg-[#F2C94C]/15 transition" title="Edit" aria-label="Edit"><Pencil size={16} /></button>
+                            <button type="button" onClick={() => handleOpenDeleteModal(mapping)} className="w-8 h-8 inline-flex items-center justify-center rounded-md border border-red-200 text-red-600 text-xs hover:bg-red-50 transition" title="Delete" aria-label="Delete"><Trash2 size={16} /></button>
+                          </div>
                         </div>
-                      </div>
+                      )
                     ))}
                   </div>
 
@@ -3772,7 +3964,7 @@ function Dashboard({
                   }
                 }
               }
-              onAddMapping({ ongoing: activeTab === 'ongoing', region: preRegion });
+              onAddMapping({ ongoing: activeTab === 'ongoing', pending: activeTab === 'pending', region: preRegion });
               setFabOpen(false);
             }}
             className={cn(

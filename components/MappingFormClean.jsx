@@ -213,7 +213,7 @@ function SearchableSelect({ options = [], selected = null, onChange = () => { },
                 }}
                 placeholder={allowCustom ? "Search or type custom..." : "Search..."}
                 className="w-full px-3 py-2 border-2 border-[#0A2D55]/10 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40"
-              />
+                  />
             </div>
           )}
           <div className="p-2 max-h-72 overflow-y-auto">
@@ -251,6 +251,7 @@ export default function MappingForm({
   onSubmit = () => { },
   initialData = null,
   ongoingMode = false,
+  pendingMode = false,
   fixedRegion = null,
   formTitle = "Add New Mapping",
   submitLabel = "Save Mapping",
@@ -277,6 +278,17 @@ export default function MappingForm({
   const [totalArea, setTotalArea] = useState("");
   const [remarks, setRemarks] = useState("");
   const [communityBenefits, setCommunityBenefits] = useState("");
+  // Pending-mode specific fields
+  const [pendingNo, setPendingNo] = useState("");
+  const [pendingRegionField, setPendingRegionField] = useState("");
+  const [pendingDateOfFiling, setPendingDateOfFiling] = useState("");
+  const [pendingProponent, setPendingProponent] = useState("");
+  const [pendingProjectNameField, setPendingProjectNameField] = useState("");
+  const [pendingProjectCost, setPendingProjectCost] = useState("");
+  const [pendingTypeOfProject, setPendingTypeOfProject] = useState("");
+  const [pendingAffectedAdIccIp, setPendingAffectedAdIccIp] = useState("");
+  const [pendingStatusOfApplication, setPendingStatusOfApplication] = useState("");
+  const [pendingStatus, setPendingStatus] = useState("");
   // Ongoing-mode specific fields
   const ONGOING_LABELS = [
     'Name of Proponent',
@@ -544,6 +556,34 @@ export default function MappingForm({
     setYearApproved(initialData.yearApproved || initialData.year || "");
     setMoaDuration(initialData.moaDuration || initialData.moa_duration || "");
     setCommunityBenefits(initialData.communityBenefits || initialData.community_benefits || "");
+    // Hydrate pending-mode fields if available in raw_fields
+    try {
+      const rf = (initialData && typeof initialData === 'object' && initialData.raw_fields && typeof initialData.raw_fields === 'object') ? initialData.raw_fields : {};
+      setPendingNo(rf.no || rf.NO || rf['No'] || rf['NO'] || '');
+      setPendingRegionField(rf.region || rf.REGION || rf['Region'] || '');
+      setPendingDateOfFiling(rf.date_of_filing_of_cp_application || rf['DATE OF FILING OF CP APPLICATION'] || rf.date_of_filing || rf.date || '');
+      setPendingProponent(rf.name_of_proponent || rf['NAME OF PROPONENT'] || rf.proponent || rf.applicant || '');
+      setPendingProjectNameField(rf.name_of_project || rf['NAME OF PROJECT'] || rf.projectName || rf.project_name || '');
+      setPendingProjectCost(rf.project_cost || rf['Project Cost'] || rf.project_cost || '');
+      // reuse `location` state for location
+      setLocation(initialData.location || rf.location || rf.LOCATION || '');
+      setPendingTypeOfProject(rf.type_of_project || rf['Type of Project'] || '');
+      // Hydrate combined affected/FPIC field. Accept either a combined raw key
+      // or separate parts and join them if present.
+      const combinedKey = Object.keys(rf || {}).find((k) => String(k).trim().toUpperCase() === 'AFFECTED AD/ICC/IP\t(FOR CP WITH ONGOING FPIC)');
+      if (combinedKey) {
+        setPendingAffectedAdIccIp(rf[combinedKey] || '');
+      } else {
+        const partA = rf.affected_ad_icc_ip || rf['AFFECTED AD/ICC/IP'] || rf.affected || '';
+        const partB = rf.for_cp_with_ongoing_fpic || rf['(for CP with ongoing FPIC)'] || '';
+        const joined = `${partA || ''}${partA && partB ? ' ' : ''}${partB || ''}`.trim();
+        setPendingAffectedAdIccIp(joined);
+      }
+      setPendingStatusOfApplication(rf.status_of_application || rf['STATUS OF APPLICATION'] || '');
+      setPendingStatus(rf.status || rf['STATUS'] || '');
+    } catch (e) {
+      // ignore
+    }
     // Hydrate ongoing fields if provided. Support several shapes:
     // - nested `initialData.ongoing` (preferred)
     // - top-level keys (legacy imports)
@@ -655,6 +695,12 @@ export default function MappingForm({
       return true;
     }
 
+    // If we're in pendingMode, allow saving with the simplified pending fields
+    if (pendingMode) {
+      setErrors({});
+      return true;
+    }
+
     if (isInventoryUser) {
       // NCIP validation
       if (!controlNumber.trim()) e.controlNumber = "Control Number is required";
@@ -679,6 +725,57 @@ export default function MappingForm({
     setIsSaving(true);
 
     const regionName = fixedRegion || regionMap.get(String(selectedRegionCode)) || selectedRegionCode || "";
+
+    // If this is a pending-mode submission, assemble raw fields and submit directly
+    if (pendingMode) {
+      try {
+        const raw = {
+          'NO': (pendingNo || '').trim(),
+          'REGION': (pendingRegionField || '').trim(),
+          'DATE OF FILING OF CP APPLICATION': (pendingDateOfFiling || '').trim(),
+          'NAME OF PROPONENT': (pendingProponent || '').trim(),
+          'NAME OF PROJECT': (pendingProjectNameField || '').trim(),
+          'Project Cost': (pendingProjectCost || '').trim(),
+          'LOCATION': (location || '').trim(),
+          'Type of Project': (pendingTypeOfProject || '').trim(),
+          // Save as a single combined raw field key matching the imported header
+          // layout. Use a tab between the two parts to match the import header string.
+          ['AFFECTED AD/ICC/IP\t(for CP with ongoing FPIC)']: (pendingAffectedAdIccIp || '').trim(),
+          'STATUS OF APPLICATION': (pendingStatusOfApplication || '').trim(),
+          'STATUS': (pendingStatus || '').trim(),
+        };
+
+        await onSubmit({ raw_fields: raw, location: (location || '').trim(), _pending: true });
+
+        if (!isModal) {
+          setAlertTick((t) => t + 1);
+          setAlert({ type: "success", message: "Pending mapping saved." });
+        }
+
+        // Reset pending fields
+        setPendingNo("");
+        setPendingRegionField("");
+        setPendingDateOfFiling("");
+        setPendingProponent("");
+        setPendingProjectNameField("");
+        setPendingProjectCost("");
+        setPendingTypeOfProject("");
+        setPendingAffectedAdIccIp("");
+        // cleared along with the combined field
+        setPendingStatusOfApplication("");
+        setPendingStatus("");
+
+        setIsSaving(false);
+        return;
+      } catch (err) {
+        if (!isModal) {
+          setAlertTick((t) => t + 1);
+          setAlert({ type: "error", message: err?.message || "Failed to save pending mapping." });
+        }
+        setIsSaving(false);
+        return;
+      }
+    }
 
     try {
       // Build a mapped ongoing payload: include sanitized keys and camelCase/common aliases
@@ -884,7 +981,58 @@ export default function MappingForm({
 
                   </>
                 ) : (
-                  isInventoryUser ? (
+                  pendingMode ? (
+                    <>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">NO</label>
+                          <input value={pendingNo} onChange={(e) => setPendingNo(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">REGION</label>
+                          <input value={pendingRegionField} onChange={(e) => setPendingRegionField(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">DATE OF FILING OF CP APPLICATION</label>
+                          <input type="date" value={pendingDateOfFiling} onChange={(e) => setPendingDateOfFiling(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">NAME OF PROPONENT</label>
+                          <input value={pendingProponent} onChange={(e) => setPendingProponent(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">NAME OF PROJECT</label>
+                          <input value={pendingProjectNameField} onChange={(e) => setPendingProjectNameField(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">Project Cost</label>
+                          <input value={pendingProjectCost} onChange={(e) => setPendingProjectCost(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">LOCATION</label>
+                          <input value={location} onChange={(e) => setLocation(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">Type of Project</label>
+                          <input value={pendingTypeOfProject} onChange={(e) => setPendingTypeOfProject(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">AFFECTED AD/ICC/IP</label>
+                          <input value={pendingAffectedAdIccIp} onChange={(e) => setPendingAffectedAdIccIp(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
+                        </div>
+                                        {/* Combined Affected AD/ICC/IP + FPIC note: single input */}
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">STATUS OF APPLICATION</label>
+                          <input value={pendingStatusOfApplication} onChange={(e) => setPendingStatusOfApplication(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-[#0A2D55] mb-2">STATUS</label>
+                          <input value={pendingStatus} onChange={(e) => setPendingStatus(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                   isInventoryUser ? (
                     <>
                       {/* NCIP Inventory User Form */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1106,7 +1254,8 @@ export default function MappingForm({
                       </div>
                     </>
                   )
-                )}
+                )
+              )}
               </div>
             </div>
 
