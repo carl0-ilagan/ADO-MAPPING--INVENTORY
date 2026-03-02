@@ -36,6 +36,7 @@ function Dashboard({
   onViewMapping = () => { },
   onEditMapping = () => { },
   onDeleteMapping = () => { },
+  onDeleteAllByStatus = () => Promise.resolve({ deleted: 0 }),
   externalAlert = null,
   externalAlertTick = 0,
   onClearExternalAlert = () => { },
@@ -43,12 +44,14 @@ function Dashboard({
   onImportMappings = () => { },
   onPreviewImport = () => { },
   availableCollections = [{ id: 'mappings', collectionName: 'mappings' }],
-  selectedCollection = 'mappings',
+  selectedCollection = 'cp_projects',
   onSelectCollection = () => { },
   mainMappings = undefined,
   treatStatusAsOngoing = false,
 }) {
   const [activeTab, setActiveTab] = useState('overview');
+  const [deleteAllDialog, setDeleteAllDialog] = useState(null); // { status, label } or null
+  const [deleteAllLoading, setDeleteAllLoading] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [regionFilter, setRegionFilter] = useState('all');
@@ -345,17 +348,17 @@ function Dashboard({
     'DAM Projects',
     'EPR',
     'Quarry Projects',
-    'Agro-Industrial & Tourism Project (Agro-Industrial: Plantation & Livelihood project and Tourism Project)',
-    'Infrastructure Projects (Telecommunication, Irrigation project, Water System, Road and Bridge Project)',
-    'Other Projects: (Bioprospecting, Feasibility Studies, Research, Treasure Hunting & Tree Cutting Activities)',
-    'TOTAL APPROVED CPs',
+    'Agro-Industrial & Tourism Project Agro-Industrial (Plantation & Livelihood project and Tourism Project)',
+    'Infrastructure Projects Telecommunication, Irrigation project, Water System, Road and Bridge Project',
+    'Other Projects: Bioprospecting, Feasibility Studies, Reaserch, Treasure Hunting & Tree Cutting Activities',
+    'TOTAL APROVED CPs',
     'TOTAL PROJECT COST',
   ];
 
   const getTableHeaders = () => {
     // When viewing the Approved tab and the first subtab (Summary) is active,
     // show the approved-summary headers.
-    if (!isInventoryUser && activeTab === 'mappings' && String(approvedSubTab || '').toLowerCase() === 'summary') {
+    if (activeTab === 'mappings' && String(approvedSubTab || '').toLowerCase() === 'summary') {
       return APPROVED_SUMMARY_HEADERS;
     }
     return isInventoryUser ? NCIP_TABLE_HEADERS : DEFAULT_TABLE_HEADERS;
@@ -427,7 +430,7 @@ function Dashboard({
       return null;
     };
 
-    if (h === 'no.' || h === 'survey number') return displayValue(getBest(['surveyNumber', 'survey_number', 'controlNumber', 'control_number']));
+    if (h === 'no.' || h === 'no' || h === '#') return displayValue(getBest(['surveyNumber', 'survey_number', 'controlNumber', 'control_number']));
     if (h === 'region') {
       const raw = getBest(['region', 'regionName', 'region_name']) || mapping.region;
       const canon = canonicalRegion(raw);
@@ -435,12 +438,18 @@ function Dashboard({
     }
     if (h === 'control number') return displayValue(getBest(['controlNumber', 'control_number', 'surveyNumber', 'survey_number']));
     if (h.includes('applicant') || h.includes('proponent')) return displayValue(getBest(['proponent', 'applicantProponent', 'applicant_proponent', 'applicant', 'applicant_name', 'applicantName']));
-    if (h.includes('name of project') || (h.includes('name') && !h.includes('region'))) return displayValue(getBest(['nameOfProject', 'name_of_project', 'projectName', 'project_name', 'name', 'title']));
-    if (h.includes('nature')) return getField(['natureOfProject', 'nature_of_project', 'nature', 'projectNature']) || '-';
+    if (h.includes('name of project') || (h.includes('name') && !h.includes('region') && !h.includes('proponent'))) return displayValue(getBest(['nameOfProject', 'name_of_project', 'projectName', 'project_name', 'name', 'title']));
+    if (h.includes('type of project') || h.includes('nature')) return displayValue(getBest(['typeOfProject', 'type_of_project', 'natureOfProject', 'nature_of_project', 'nature', 'projectNature', 'projectType']));
+    if (h.includes('project location') || h === 'location') return displayValue(getBest(['location', 'projectLocation', 'project_location', 'province', 'provinceName', 'province_name', 'location_full']));
+    if (h.includes('ancestral domain')) return displayValue(getBest(['ancestralDomain', 'affected_ancestral_domain', 'affectedAncestralDomain', 'ancestral_domains']));
+    if (h.includes('date of application') || h.includes('date of filing')) return displayValue(getBest(['dateOfApplication', 'date_of_application', 'date_filed', 'dateFiled', 'date_of_filing']));
+    if (h.includes('project cost') || h === 'cost') return displayValue(getBest(['projectCost', 'project_cost', 'cost']));
+    if (h.includes('status of application') || h === 'status of application') return displayValue(getBest(['statusOfApplication', 'status_of_application', 'remarks', 'application_status']));
+    if (h === 'status') return displayValue(getBest(['status']));
+    if (h.includes('ongoing fpic') || h.includes('for cp with')) return displayValue(getBest(['hasOngoingFpic', 'has_ongoing_fpic', 'ongoingFpic', 'ongoing_fpic']));
 
     if (h.includes('cadt')) return displayValue(getBest(['cadtStatus', 'cadt_status', 'cadt']));
-    if (h === 'icc' || h.includes('icc')) return displayValue(getBest(['icc', 'iccs', 'affectedICC', 'affected_icc', 'affected_iccs']));
-    if (h === 'location') return displayValue(getBest(['location', 'province', 'provinceName', 'province_name', 'location_full']));
+    if (h === 'icc' || h.includes('icc') || h.includes('ad/icc') || h.includes('affected ad')) return displayValue(getBest(['icc', 'iccs', 'affectedICC', 'affected_icc', 'affected_iccs']));
     if (h.includes('year')) return displayValue(getBest(['yearApproved', 'year_approved', 'year', 'approvedYear']));
     if (h.includes('moa duration') || h === 'moa duration') return displayValue(getBest(['moaDuration', 'moa_duration', 'moa']));
     if (h.includes('province')) return displayValue(getBest(['province', 'provinceName', 'province_name']));
@@ -724,35 +733,52 @@ function Dashboard({
 
 
 
-      const FIELD_ALIASES = {
-        issuanceOfWorkOrder: ['issuanceOfWorkOrder', 'issuance of work order', 'issuance_of_work_order', 'issuanceworkorder', 'issuance_work_order'],
-        preFBIConference: ['preFBIConference', 'pre-fbi conference', 'pre_fbi_conference', 'prefbiconference'],
-        conductOfFBI: ['conductOfFBI', 'conduct of fbi', 'conduct_fbi', 'conductfbi'],
-        reviewOfFBIReport: ['reviewOfFBIReport', 'review of fbi report', 'review_fbi_report', 'reviewfbireport'],
-        preFPICConference: ['preFPICConference', 'pre-fpic conference', 'pre_fpic_conference', 'prefpicconference'],
-        firstCommunityAssembly: ['firstCommunityAssembly', '1st community assembly', 'first_community_assembly', 'firstcommunityassembly'],
-        secondCommunityAssembly: ['secondCommunityAssembly', '2nd community assembly', 'second_community_assembly', 'secondcommunityassembly'],
-        consensusBuildingDecision: ['consensusBuildingDecision', 'consensus building & decision meeting', 'consensus_building_decision', 'consensusbuildingdecision'],
-        moaValidationRatificationSigning: ['moaValidationRatificationSigning', 'moa validation ratification signing', 'moa_validation_ratification_signing', 'moavalidationratificationsigning'],
-        issuanceResolutionOfConsent: ['issuanceResolutionOfConsent', 'issuance of resolution of consent', 'issuance_resolution_of_consent', 'issuanceresolutionofconsent'],
-        reviewByRRT: ['reviewByRRT', 'review of the fpic report by rrt', 'review_by_rrt', 'reviewbyrrt'],
-        reviewByADOorLAO: ['reviewByADOorLAO', 'review of the fpic report by ado & lao', 'review_by_ado_or_lao', 'reviewbyadoorlao'],
-        forComplianceOfFPICTeam: ['forComplianceOfFPICTeam', 'for compliance of fpic team', 'for_compliance_of_fpic_team', 'forcomplianceoffpicteam'],
-        cebDeliberation: ['cebDeliberation', 'ceb deliberation', 'ceb_deliberation', 'cebdeliberation'],
+      // FIELD_SNAKE maps camelCase key → snake_case Firestore field name
+      const FIELD_SNAKE = {
+        issuanceOfWorkOrder: 'issuance_of_work_order',
+        preFBIConference: 'pre_fbi_conference',
+        conductOfFBI: 'conduct_of_fbi',
+        reviewOfFBIReport: 'review_of_fbi_report',
+        preFPICConference: 'pre_fpic_conference',
+        firstCommunityAssembly: 'first_community_assembly',
+        secondCommunityAssembly: 'second_community_assembly',
+        consensusBuildingDecision: 'consensus_building_decision',
+        moaValidationRatificationSigning: 'moa_validation_ratification_signing',
+        issuanceResolutionOfConsent: 'issuance_resolution_of_consent',
+        reviewByRRT: 'review_by_rrt',
+        reviewByADOorLAO: 'review_by_ado_or_lao',
+        forComplianceOfFPICTeam: 'for_compliance_of_fpic_team',
+        cebDeliberation: 'ceb_deliberation',
+      };
+
+      // Returns true only if a step field value is a real step status (done/pending/date/number)
+      // — NOT just any non-empty string (which catches wrongly-mapped data like ICC names, locations, etc.)
+      const isStepValue = (v) => {
+        if (v === null || v === undefined) return false;
+        const s = String(v).trim().toLowerCase();
+        if (!s) return false;
+        // Explicit status words
+        if (['done', 'pending', 'completed', 'finished', 'ongoing', 'for compliance', 'complied'].some(w => s === w || s.startsWith(w))) return true;
+        // Date-like: contains digits with separators (e.g. 2024-01-15, 01/15/2024, Jan 15 2024)
+        if (/\d{1,4}[\-\/\.]\d{1,2}[\-\/\.]\d{1,4}/.test(s)) return true;
+        if (/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/.test(s) && /\d/.test(s)) return true;
+        // Excel serial-like number (reasonable year range)
+        if (/^\d+$/.test(s)) {
+          const n = Number(s);
+          if (n > 40000 && n < 55000) return true; // Excel date serial for ~2010-2050
+        }
+        return false;
       };
 
       const inc = (keyName) => {
-        const aliases = Array.isArray(FIELD_ALIASES[keyName]) ? FIELD_ALIASES[keyName] : [keyName];
-        for (const alias of aliases) {
-          const v = lookupVal(m, alias);
-          if (!v) continue;
-          if (Array.isArray(v)) {
-            if (v.length > 0) { obj[keyName] += 1; return; }
-          } else if (typeof v === 'number') {
-            if (v !== 0) { obj[keyName] += 1; return; }
-          } else if (String(v).trim() !== '') {
-            obj[keyName] += 1; return;
-          }
+        // 1. Direct camelCase key (set by App.jsx mappingsFormat)
+        const direct = m[keyName];
+        if (isStepValue(direct)) { obj[keyName] += 1; return; }
+        // 2. Snake_case in raw_fields (the Firestore document)
+        const snake = FIELD_SNAKE[keyName];
+        if (snake && m.raw_fields) {
+          const rfv = m.raw_fields[snake];
+          if (isStepValue(rfv)) { obj[keyName] += 1; return; }
         }
       };
 
@@ -971,8 +997,14 @@ function Dashboard({
   // completed yet). Otherwise, filter by explicit ongoing flags/import markers.
   const isSelectedCollectionOngoing = selectedCollection && String(selectedCollection).toLowerCase().includes('ongoing');
   const isSelectedCollectionPending = selectedCollection && String(selectedCollection).toLowerCase().includes('pending');
+  const isSelectedCollectionCPProjects = selectedCollection && String(selectedCollection).toLowerCase() === 'cp_projects';
+  
   const ongoingRecords = Array.isArray(mappings)
-    ? (isSelectedCollectionOngoing ? mappings : mappings.filter((m) => isOngoingMapping(m)))
+    ? (isSelectedCollectionCPProjects 
+        ? mappings.filter((m) => m._ongoing === true || String(m.status).toLowerCase() === 'ongoing')
+        : isSelectedCollectionOngoing 
+        ? mappings 
+        : mappings.filter((m) => isOngoingMapping(m)))
     : [];
 
   const ongoingSummaryRows = computeSummaryRows(ongoingRecords || []);
@@ -1023,6 +1055,8 @@ function Dashboard({
 
     // Apply search / region / remarks filtering first (same rules as main list)
     const query = String(searchQuery || '').toLowerCase();
+    console.log('🔍 Ongoing Tab - Search query:', `"${query}"`, 'Records before filter:', ongoingRecords.length);
+    
     const prefiltered = ongoingRecords.filter((mapping) => {
       if (!mapping) return false;
       if (regionFilter !== 'all') {
@@ -1043,6 +1077,15 @@ function Dashboard({
         String(mapping.remarks || '').toLowerCase().includes(query) ||
         String(mapping.proponent || mapping.applicant || mapping.applicantProponent || mapping.nameOfProject || mapping.projectName || '').toLowerCase().includes(query)
       );
+    console.log('🔍 Ongoing Tab - After search filter:', prefiltered.length);
+    if (query && prefiltered.length > 0) {
+      console.log('🔍 Ongoing Tab - Sample match:', {
+        surveyNumber: prefiltered[0].surveyNumber,
+        proponent: prefiltered[0].proponent || prefiltered[0].applicant,
+        region: prefiltered[0].region
+      });
+    }
+
     });
 
     // If tab is unfiltered global view, return prefiltered list
@@ -1324,13 +1367,15 @@ function Dashboard({
         try {
           if (m && m.raw_fields && typeof m.raw_fields === 'object') {
             const rfKeys = Object.keys(m.raw_fields || {}).map((k) => String(k || '').toLowerCase());
-            // project location variants
-            if (rfKeys.some((k) => k.includes('project') && k.includes('location'))) {
+            // project location variants — only for location keys
+            const isLocationKey = dk.toLowerCase().includes('location') || key === 'location';
+            if (isLocationKey && rfKeys.some((k) => k.includes('project') && k.includes('location'))) {
               const k = rfKeys.find((k) => k.includes('project') && k.includes('location'));
               if (k && m.raw_fields[k]) return String(m.raw_fields[k]);
             }
-            // icc variants
-            if (rfKeys.some((k) => k.includes('icc') || k.includes('affected_icc') || k.includes('affected_iccs') || k.includes('affected_iccs/ips') || k.includes('affected_iccs_ips'))) {
+            // icc variants — only for icc/iccs keys
+            const isIccKey = dk.toLowerCase().includes('icc') || key === 'iccs' || key === 'icc';
+            if (isIccKey && rfKeys.some((k) => k.includes('icc') || k.includes('affected_icc') || k.includes('affected_iccs') || k.includes('affected_iccs/ips') || k.includes('affected_iccs_ips'))) {
               const matches = rfKeys.filter((k) => k.includes('icc') || k.includes('affected_icc') || k.includes('affected_iccs') || k.includes('affected_iccs/ips') || k.includes('affected_iccs_ips'));
               const vals = [];
               matches.forEach((mk) => {
@@ -1339,8 +1384,9 @@ function Dashboard({
               });
               if (vals.length) return vals.join(', ');
             }
-            // region fallback: look for a raw field explicitly labelled 'region' or 'sheet'
-            if (rfKeys.some((k) => k === 'region' || k === 'sheet' || k.includes('region'))) {
+            // region fallback — only for region keys
+            const isRegionKey = dk.toLowerCase().includes('region') || key === 'region';
+            if (isRegionKey && rfKeys.some((k) => k === 'region' || k === 'sheet' || k.includes('region'))) {
               const k = rfKeys.find((k) => k === 'region' || k === 'sheet' || k.includes('region'));
               if (k && m.raw_fields[k]) return String(m.raw_fields[k]);
             }
@@ -1576,10 +1622,19 @@ function Dashboard({
     { value: 'none', label: 'No Remarks' },
   ]), []);
 
+  console.log('🔍 Approved/Mappings Tab - Total mappings:', mappings.length, 'Search query:', `"${searchQuery}"`);
+  
   const filteredMappings = mappings.filter((mapping) => {
+    // Special handling for cp_projects unified table
+    if (isSelectedCollectionCPProjects && activeTab === 'mappings') {
+      // For cp_projects, 'mappings' tab shows Approved status
+      const status = String(mapping.status || '').toLowerCase();
+      if (status !== 'approved') return false;
+    }
+    
     // Hide mappings marked as ongoing or imported into an 'ongoing' collection
     // from the main mappings (Approved) view
-    if (activeTab === 'mappings' && mapping) {
+    if (activeTab === 'mappings' && mapping && !isSelectedCollectionCPProjects) {
       if (mapping._ongoing === true || String(mapping._ongoing || '').toLowerCase() === 'true') return false;
       const ic = String(mapping.importCollection || '').toLowerCase();
       if (ic && ic.includes('ongoing')) return false;
@@ -1634,6 +1689,15 @@ function Dashboard({
     );
   });
 
+  console.log('🔍 Approved/Mappings Tab - Filtered results:', filteredMappings.length);
+  if (searchQuery && filteredMappings.length > 0) {
+    console.log('🔍 Approved/Mappings Tab - Sample match:', {
+      surveyNumber: filteredMappings[0].surveyNumber,
+      proponent: filteredMappings[0].proponent || filteredMappings[0].applicant,
+      region: filteredMappings[0].region
+    });
+  }
+
   // Pagination calculations
   const totalPages = Math.ceil(filteredMappings.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -1656,6 +1720,42 @@ function Dashboard({
   // Approved Summary aggregation helper
   const computeApprovedSummaryRows = (mappings) => {
     if (!Array.isArray(mappings)) return [];
+
+    // Normalize any region string to the canonical short form used in the Excel summary
+    // e.g. "R13", "Region XIII", "Region 13", "REGION 13" → "13"
+    //      "Region IV-A", "IVA", "4-A" → "4A"
+    //      "Region VI/VII", "6&7", "R6/7" → "6&7"
+    //      "CORDILLERA", "CAR" → "CAR"
+    const normalizeRegion = (raw) => {
+      if (!raw) return 'Unknown';
+      const v = String(raw).trim();
+      const up = v.toUpperCase().replace(/[\u2013\u2014]/g, '-');
+      if (up.includes('CORDILLERA') || up === 'CAR' || up.startsWith('CAR')) return 'CAR';
+      // Region 6&7 / 6/7 variants
+      if (/6\s*[&/|]\s*7|VI\s*[/|&]\s*VII/.test(up)) return '6&7';
+      // Roman numeral with A/B suffix: Region IV-A, IVA, 4-A, 4A
+      const romanToNum = { I:1,II:2,III:3,IV:4,V:5,VI:6,VII:7,VIII:8,IX:9,X:10,XI:11,XII:12,XIII:13 };
+      const romanSuffix = up.match(/(?:REGION\s*)?(XIII|XII|XI|X|IX|VIII|VII|VI|V|IV|III|II|I)\s*-?\s*(A|B)\b/);
+      if (romanSuffix) { const n = romanToNum[romanSuffix[1]]; return n ? `${n}${romanSuffix[2]}` : v; }
+      // Roman numeral without suffix
+      const roman = up.match(/(?:REGION\s*)?(XIII|XII|XI|X|IX|VIII|VII|VI|V|IV|III|II|I)\b/);
+      if (roman) { const n = romanToNum[roman[1]]; return n ? String(n) : v; }
+      // Arabic: "Region 13", "R13", "13", "4A", "4-A"
+      const arabic = up.match(/(?:REGION\s+|\bR)(\d{1,2})\s*-?\s*(A|B)?$/) || up.match(/^(\d{1,2})\s*-?\s*(A|B)?$/);
+      if (arabic) {
+        const n = Number(arabic[1]);
+        if (n >= 1 && n <= 13) return arabic[2] ? `${n}${arabic[2]}` : String(n);
+      }
+      return v;
+    };
+
+    // Deduplicate by control/survey number to remove records imported multiple times.
+    // Each re-import creates new Firestore docs with different auto-IDs but same content.
+    // No dedup needed — extra non-region sheets (ExtractiveMining Companies, etc.)
+    // are now blocked at import time in cpProjectsService.js, so all records in
+    // Firestore are clean and unique. Using all records directly.
+    const uniqueMappings = mappings;
+    console.debug('[CP Summary] Total records:', mappings.length);
     const regionMap = {};
 
     const parseCost = (raw) => {
@@ -1670,7 +1770,12 @@ function Dashboard({
 
     const getTypeString = (m) => {
       try {
-        // prefer raw_fields variants, then fall back to rendered value
+        // Check top-level mapped fields first (from App.jsx mappingsFormat)
+        const topCandidates = ['typeOfProject', 'type_of_project', 'natureOfProject', 'type', 'projectType'];
+        for (const c of topCandidates) {
+          if (m && m[c]) return String(m[c]);
+        }
+        // Then check raw_fields
         if (m && m.raw_fields) {
           const rf = m.raw_fields;
           const candidates = ['Type of project', 'typeOfProject', 'type_of_project', 'type', 'natureOfProject', 'nature', 'projectType'];
@@ -1685,43 +1790,60 @@ function Dashboard({
 
     const getRegionString = (m) => {
       try {
-        if (m && m.region) return String(m.region);
+        if (m && m.region) return normalizeRegion(String(m.region));
         if (m && m.raw_fields) {
           const rf = m.raw_fields;
-          if (rf.region) return String(rf.region);
+          if (rf.region) return normalizeRegion(String(rf.region));
           const keys = Object.keys(rf || {});
           const k = keys.find(k => String(k).toLowerCase().includes('region'));
-          if (k) return String(rf[k]);
+          if (k) return normalizeRegion(String(rf[k]));
         }
       } catch (e) { }
       return 'Unknown';
     };
 
-    for (const m of mappings) {
+    for (const m of uniqueMappings) {
       const region = String(getRegionString(m) || 'Unknown').trim() || 'Unknown';
       if (!Object.prototype.hasOwnProperty.call(regionMap, region)) {
         regionMap[region] = { mining: 0, energy: 0, dam: 0, epr: 0, quarry: 0, agro: 0, infra: 0, other: 0, total: 0, cost: 0 };
       }
       const row = regionMap[region];
       const typeRaw = String(getTypeString(m) || '').toLowerCase();
-      const costRaw = (m && m.raw_fields && (m.raw_fields['Project Cost'] || m.raw_fields['project_cost'] || m.raw_fields['project cost'])) || m['Project Cost'] || m.projectCost || '';
-      const cost = parseCost(costRaw);
+      // Try all sources for cost and pick the first non-zero result.
+      // Some records have project_cost only in raw_fields; others only at top level.
+      const costCandidates = [
+        m.projectCost,
+        m['Project Cost'],
+        m && m.raw_fields && m.raw_fields['project_cost'],
+        m && m.raw_fields && m.raw_fields['Project Cost'],
+        m && m.raw_fields && m.raw_fields['project cost'],
+      ];
+      const cost = costCandidates.reduce((best, raw) => {
+        if (best !== 0) return best;
+        const v = parseCost(raw);
+        return v !== 0 ? v : 0;
+      }, 0);
 
-      let matched = false;
-      if (/mining|mineral/.test(typeRaw)) { row.mining += 1; matched = true; }
-      else if (/energy|power|solar|wind|geothermal|hydro/.test(typeRaw)) { row.energy += 1; matched = true; }
-      else if (/dam/.test(typeRaw)) { row.dam += 1; matched = true; }
-      else if (/\bepr\b|environmental/.test(typeRaw)) { row.epr += 1; matched = true; }
-      else if (/quarry/.test(typeRaw)) { row.quarry += 1; matched = true; }
-      else if (/agro|plantation|livelihood|tourism/.test(typeRaw)) { row.agro += 1; matched = true; }
-      else if (/infrastructure|road|bridge|irrigation|telecom|water|telecommunication/.test(typeRaw)) { row.infra += 1; matched = true; }
-      else { row.other += 1; }
+      if (/mining|mineral/.test(typeRaw)) { row.mining += 1; }
+      else if (/energy|power|solar|wind|geothermal|hydro|electric|renewable|biomass|biogas|run.of.river|mini.hydro|natural.gas|lng|coal|petroleum|transmission|generation|photovoltaic|pv.plant|wpp|hpp|gpp/.test(typeRaw)) { row.energy += 1; }
+      else if (/\bdam\b/.test(typeRaw)) { row.dam += 1; }
+      else if (/\bepr\b|environmental/.test(typeRaw)) { row.epr += 1; }
+      else if (/quarry/.test(typeRaw)) { row.quarry += 1; }
+      else if (/agro|plantation|livelihood|tourism/.test(typeRaw)) { row.agro += 1; }
+      else if (/infrastructure|road|bridge|irrigation|telecom|\bwater\b|telecommunication/.test(typeRaw)) { row.infra += 1; }
+      else { row.other += 1; console.debug('[CP Summary] unmatched type →', JSON.stringify(typeRaw), 'region:', region); }
 
       row.total += 1;
       row.cost += Number(cost || 0);
     }
 
-    const rows = Object.keys(regionMap).sort((a, b) => a.localeCompare(b)).map((region) => ({ Region: region, ...regionMap[region] }));
+    // Fixed order matching the Excel file: CAR first, then regions 1-13 numerically
+    const REGION_ORDER = ['CAR','1','2','3','4A','4B','5','6&7','7','8','9','10','11','12','13'];
+    const regionSortKey = (r) => {
+      const idx = REGION_ORDER.indexOf(r);
+      return idx >= 0 ? idx : 99 + r.charCodeAt(0);
+    };
+    const rows = Object.keys(regionMap).sort((a, b) => regionSortKey(a) - regionSortKey(b)).map((region) => ({ Region: region, ...regionMap[region] }));
     // totals row
     const totals = rows.reduce((acc, r) => {
       acc.mining += r.mining; acc.energy += r.energy; acc.dam += r.dam; acc.epr += r.epr; acc.quarry += r.quarry; acc.agro += r.agro; acc.infra += r.infra; acc.other += r.other; acc.total += r.total; acc.cost += r.cost; return acc;
@@ -1746,13 +1868,17 @@ function Dashboard({
     return mapped;
   };
 
-  const isApprovedSummaryView = (!isInventoryUser && activeTab === 'mappings' && String(approvedSubTab || '').toLowerCase() === 'summary');
+  const isApprovedSummaryView = (activeTab === 'mappings' && String(approvedSubTab || '').toLowerCase() === 'summary');
   const approvedSummaryRows = isApprovedSummaryView ? computeApprovedSummaryRows(filteredMappings) : [];
   const rowsToRender = isApprovedSummaryView ? approvedSummaryRows : paginatedMappings;
 
   // Pending records (detection by status/_pending/pending flag) with subtabs
   const pendingRecordsAll = Array.isArray(mappings)
-    ? (isSelectedCollectionPending ? mappings : mappings.filter((m) => isPendingMapping(m)))
+    ? (isSelectedCollectionCPProjects
+        ? mappings.filter((m) => m._pending === true || String(m.status).toLowerCase() === 'pending')
+        : isSelectedCollectionPending 
+        ? mappings 
+        : mappings.filter((m) => isPendingMapping(m)))
     : [];
 
   const filteredPendingRecords = React.useMemo(() => {
@@ -1781,6 +1907,15 @@ function Dashboard({
         String(mapping.remarks || '').toLowerCase().includes(query) ||
         String(mapping.proponent || mapping.applicant || mapping.applicantProponent || mapping.nameOfProject || mapping.projectName || '').toLowerCase().includes(query)
       );
+    console.log('🔍 Pending Tab - After search filter:', prefiltered.length);
+    if (query && prefiltered.length > 0) {
+      console.log('🔍 Pending Tab - Sample match:', {
+        surveyNumber: prefiltered[0].surveyNumber,
+        proponent: prefiltered[0].proponent || prefiltered[0].applicant,
+        region: prefiltered[0].region
+      });
+    }
+
     });
 
     if (unfilteredTabs.includes(id)) return prefiltered;
@@ -2026,6 +2161,7 @@ function Dashboard({
 
   // Reset to page 1 when search query changes
   const handleSearch = (value) => {
+    console.log('🔍 Dashboard Search:', `"${value}"`, 'Length:', value.length);
     setSearchQuery(value);
     setCurrentPage(1);
   };
@@ -2144,10 +2280,10 @@ function Dashboard({
         // Read CSV as text and parse into a workbook using XLSX.read
         // (xlsx-js-style doesn't expose csv_to_sheet; read CSV as string instead)
         const text = await file.text();
-        wb = XLSX.read(text, { type: 'string' });
+        wb = XLSX.read(text, { type: 'string', cellDates: true });
       } else {
         const buffer = await file.arrayBuffer();
-        wb = XLSX.read(buffer, { type: 'array' });
+        wb = XLSX.read(buffer, { type: 'array', cellDates: true });
       }
       const headerKeywords = [
         'survey',
@@ -2316,8 +2452,12 @@ function Dashboard({
           const row = rows[r] || [];
           const rawObj = {};
           for (let i = 0; i < headerRowOriginal.length; i += 1) {
-            const key = sanitizeFieldName(headerRowOriginal[i] || `col_${i}`);
-            rawObj[key] = row[i] !== undefined && row[i] !== null ? String(row[i]).trim() : '';
+            const key = headerRowOriginal[i];
+            if (row[i] instanceof Date) {
+              rawObj[key] = row[i]; // keep as Date; parseDate in schema will handle it
+            } else {
+              rawObj[key] = row[i] !== undefined && row[i] !== null ? String(row[i]).trim() : '';
+            }
           }
           rawRecords.push(rawObj);
 
@@ -2330,7 +2470,7 @@ function Dashboard({
 
         console.log(`✅ Sheet "${sheetName}" - Imported ${records.length} records`);
 
-        return { records, rawRecords, error: null, sheetName };
+        return { records, rawRecords, headers: headerRowOriginal, error: null, sheetName };
       };
 
       const allRecords = [];
@@ -2339,7 +2479,8 @@ function Dashboard({
       const dataSheets = wb.SheetNames.filter((sheetName) => {
         if (!sheetName) return false;
         const sn = String(sheetName || '').trim().toLowerCase();
-        if (skipSheets.has(sn)) return false;
+        // Skip exact matches or any sheet containing "summary"
+        if (skipSheets.has(sn) || sn.includes('summary')) return false;
         const ws = wb.Sheets[sheetName];
         if (!ws) return false;
         const wsRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
@@ -2354,12 +2495,12 @@ function Dashboard({
         if (!ws) return;
         const wsRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
 
-        const { records, error, rawRecords } = buildRecordsFromRows(wsRows, sheetName);
+        const { records, error, rawRecords, headers: sheetHeaders } = buildRecordsFromRows(wsRows, sheetName);
         if (error) {
           invalidSheets.push(sheetName);
         } else {
           allRecords.push(...records);
-          if (rawRecords && rawRecords.length) rawSheets.push({ sheetName, rawRecords });
+          if (rawRecords && rawRecords.length) rawSheets.push({ sheetName, rawRecords, headers: sheetHeaders || [] });
         }
 
         const progress = 10 + Math.round(((index + 1) / totalSheets) * 70);
@@ -2425,35 +2566,17 @@ function Dashboard({
       // If user is the NCIP inventory user and is currently on the Ongoing tab,
       // force the import into a dedicated ongoing collection so Approved and
       // Ongoing are stored separately in Firestore.
-      let options = { mode, onProgress: (p) => setImportProgress(p), targetTab: activeTab };
-      let forcedImportCollection = null;
+      let options = { mode, onProgress: (p) => setImportProgress(p), targetTab: activeTab, rawImport: importRawSheets, targetCollection: 'cp_projects' };
       try {
-        // If the import was initiated while the user was on the Ongoing or Pending tab,
-        // default to creating a dedicated import collection so that uploads appear
-        // only under that tab. For ongoing imports we mark documents as ongoing.
-        if (activeTab === 'ongoing' || activeTab === 'pending') {
-          const uid = user?.uid || 'anon';
-          const prefix = activeTab === 'ongoing' ? 'mappings_ongoing_' : 'mappings_pending_';
-          forcedImportCollection = `${prefix}${uid}`;
-          options = { ...options, mode: 'newCollection', collectionName: forcedImportCollection, forceOngoing: activeTab === 'ongoing' };
+        // For unified cp_projects table, just pass activeTab for status assignment.
+        // No need to force separate collections - status field handles tab routing.
+        if (activeTab === 'ongoing') {
+          options.forceOngoing = true;
         }
       } catch (e) {
         // ignore
       }
-      if (options.mode === 'newCollection') {
-        // When creating a new collection, prefer the user-supplied collection name
-        // if provided. If no name is supplied and the import was started from
-        // Ongoing/Pending, default to the forced collection name.
-        if (forcedImportCollection) {
-          options.collectionName = (collectionName && String(collectionName).trim()) ? String(collectionName).trim() : forcedImportCollection;
-        } else {
-          options.collectionName = collectionName || importCollectionName;
-        }
-        // When creating a new collection, include the raw sheet rows so the
-        // created collection uses the original Excel headers as document fields.
-        options.rawImport = importRawSheets;
-      }
-      await onImportMappings(prepared, options);
+      await onImportMappings(prepared, { ...options, activeTab }); // Pass current tab for status assignment
       // If we imported into a dedicated ongoing collection, switch UI to show it
       try {
         const col = options && options.collectionName;
@@ -2986,46 +3109,7 @@ function Dashboard({
               </div>
 
               <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-                {Array.isArray(availableCollections) && availableCollections.length > 1 && activeTab !== 'ongoing' && activeTab !== 'overview' ? (
-                  <div className="flex items-center gap-2 mr-2">
-                    <label className="sr-only">Collection</label>
-                    <Select
-                      value={dropdownSelections[activeTab === 'ongoing' ? 'ongoing' : (activeTab === 'pending' ? 'pending' : 'mappings')]}
-                      onValueChange={(value) => {
-                        const key = activeTab === 'ongoing' ? 'ongoing' : (activeTab === 'pending' ? 'pending' : 'mappings');
-                        console.log('Dashboard: dropdown changed ->', { key, value, activeTab, selectedCollection });
-                        setDropdownSelections((s) => ({ ...s, [key]: value }));
-                        // If the dropdown change happened on the currently active tab,
-                        // load the collection immediately so the selected data remains visible.
-                        if (activeTab === key) {
-                          // don't trigger load for the placeholder empty entry
-                          if (value && value !== '__none__' && typeof onSelectCollection === 'function') {
-                            console.log('Dashboard: calling onSelectCollection from dropdown ->', value);
-                            onSelectCollection(value);
-                          }
-                        }
-                      }}
-                    >
-                      <SelectTrigger className="relative w-[220px] bg-white/5 text-white/90 text-sm rounded-lg px-3 py-2 border border-white/10">
-                        <SelectValue placeholder="Select collection" />
-                        <div className="absolute inset-0 pointer-events-none flex items-center px-3">
-                          <span className="truncate text-sm text-white/90">{currentSelectionDisplay}</span>
-                        </div>
-                      </SelectTrigger>
-                      <SelectContent className="bg-white border-[#0A2D55]/10 rounded-xl shadow-2xl">
-                        {filteredCollectionsForDropdown.length > 0 ? (
-                          filteredCollectionsForDropdown.map((c) => (
-                            <SelectItem key={c.id} value={c.collectionName}>{c.displayName || c.collectionName}</SelectItem>
-                          ))
-                        ) : (
-                          <SelectItem value="__none__" disabled>
-                            {activeTab === 'ongoing' ? 'No ongoing collections' : 'No collections'}
-                          </SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ) : null}
+                {/* Collection dropdown removed - using unified cp_projects table */}
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
@@ -3035,7 +3119,22 @@ function Dashboard({
                   Upload Excel
                 </button>
 
-                {/* Clear All Records button removed */}
+                {/* Delete All button — shown per active tab */}
+                {(activeTab === 'ongoing' || activeTab === 'pending' || activeTab === 'mappings') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const status = activeTab === 'ongoing' ? 'Ongoing' : activeTab === 'pending' ? 'Pending' : 'Approved';
+                      const label = activeTab === 'ongoing' ? 'Ongoing' : activeTab === 'pending' ? 'Pending' : 'Approved';
+                      setDeleteAllDialog({ status, label });
+                    }}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500/80 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white ring-1 ring-red-300/30 backdrop-blur-md hover:bg-red-600 transition active:scale-95"
+                  >
+                    <Trash2 size={16} className="sm:w-4.5 sm:h-4.5" />
+                    Delete All {activeTab === 'ongoing' ? 'Ongoing' : activeTab === 'pending' ? 'Pending' : 'Approved'}
+                  </button>
+                )}
+
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -3044,6 +3143,62 @@ function Dashboard({
                   className="hidden"
                 />
               </div>
+
+              {/* Delete All Confirmation Dialog */}
+              {deleteAllDialog && createPortal(
+                <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                  <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+                        <Trash2 size={20} className="text-red-600" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-gray-900 text-base">Delete All {deleteAllDialog.label} Records?</h3>
+                        <p className="text-sm text-gray-500 mt-0.5">This will permanently delete ALL {deleteAllDialog.label} records from Firestore. This cannot be undone.</p>
+                      </div>
+                    </div>
+                    <p className="text-sm text-gray-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-5">
+                      ⚠️ After deleting, you can re-import a fresh Excel file to restore the data.
+                    </p>
+                    <div className="flex gap-3 justify-end">
+                      <button
+                        type="button"
+                        disabled={deleteAllLoading}
+                        onClick={() => setDeleteAllDialog(null)}
+                        className="px-4 py-2 rounded-lg text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 transition disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={deleteAllLoading}
+                        onClick={async () => {
+                          setDeleteAllLoading(true);
+                          try {
+                            const result = await onDeleteAllByStatus(deleteAllDialog.status);
+                            setDeleteAllDialog(null);
+                            setAlertTick((t) => t + 1);
+                            setAlert({ type: 'success', message: `Deleted ${result?.deleted ?? 0} ${deleteAllDialog.label} records. You can now re-import.` });
+                          } catch (err) {
+                            setAlertTick((t) => t + 1);
+                            setAlert({ type: 'error', message: err?.message || 'Failed to delete records.' });
+                          } finally {
+                            setDeleteAllLoading(false);
+                          }
+                        }}
+                        className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition disabled:opacity-50 flex items-center gap-2"
+                      >
+                        {deleteAllLoading ? (
+                          <><span className="animate-spin inline-block w-4 h-4 border-2 border-white/40 border-t-white rounded-full" />Deleting...</>
+                        ) : (
+                          <>Delete All {deleteAllDialog.label}</>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>,
+                document.body
+              )}
             </div>
           </div>
         </div>

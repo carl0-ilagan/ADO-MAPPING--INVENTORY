@@ -8,6 +8,7 @@ import { RightSplitModal } from '@/components/RightSplitModal';
 import { ProfilePage } from '@/components/ProfilePage';
 import { onAuthStateChangeListener, signOutUser } from '@/lib/firebaseAuth.js';
 import { getUserMappings, addMapping, deleteMapping, updateMapping, addMappingToCollection, getMappingsFromCollection, registerImportCollection, getUserImportCollections, updateDocumentInCollection, computeLocationFromMapping } from '@/lib/firebaseDB.js';
+import { getAllCPProjects, deleteCPProjectsByIds } from '@/lib/cpProjectsService.js';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase.js';
 
@@ -25,7 +26,7 @@ export function App() {
   const [toast, setToast] = useState(null);
   const [toastTick, setToastTick] = useState(0);
   const [availableCollections, setAvailableCollections] = useState([{ id: 'mappings', collectionName: 'mappings' }]);
-  const [selectedCollection, setSelectedCollection] = useState('mappings');
+  const [selectedCollection, setSelectedCollection] = useState('cp_projects');
 
   const buildDisplay = (m) => ({
     location: computeLocationFromMapping(m) || (m.location || ''),
@@ -68,13 +69,85 @@ export function App() {
           role: userData.role || 'user',
           communityName: userData.communityName || ''
         });
-        // Load user's mappings from Firestore and merge with sample data
+        // Load CP Projects data as default (unified table for all statuses)
         setIsLoadingMappings(true);
         try {
+          console.log('🚀 Initial load: Loading CP Projects from cp_projects table');
+          const cpProjects = await getAllCPProjects();
+          console.log('📊 Loaded cp_projects count:', cpProjects.length);
+          
+          // Convert to mappings format for Dashboard compatibility
+          const mappingsFormat = cpProjects.map(p => ({
+            id: p.id,
+            surveyNumber: p.control_number || p.survey_number || '',
+            proponent: p.proponent || '',
+            applicant: p.proponent || '',
+            nameOfProject: p.project_name || '',
+            projectName: p.project_name || '',
+            typeOfProject: p.type_of_project || '',
+            natureOfProject: p.type_of_project || '',
+            location: p.location || p.province || '',
+            projectCost: p.project_cost || '',
+            totalArea: p.total_area || '',
+            area: p.total_area || '',
+            ancestralDomain: p.affected_ancestral_domain || '',
+            dateOfApplication: p.date_filed || '',
+            date_filed: p.date_filed || '',
+            region: p.region || '',
+            province: p.province || '',
+            municipality: p.municipality || '',
+            municipalities: p.municipality ? [p.municipality] : [],
+            barangays: p.barangay ? [p.barangay] : [],
+            icc: p.affected_icc || [],
+            iccs: Array.isArray(p.affected_icc) ? p.affected_icc.join(', ') : (p.affected_icc || ''),
+            // FBI / FPIC workflow step fields
+            reviewOfApplicationDocuments: p.review_of_application_documents || '',
+            needForFBI: p.need_for_fbi || '',
+            issuanceOfWorkOrder: p.issuance_of_work_order || '',
+            preFBIConference: p.pre_fbi_conference || '',
+            approvalOfWFP: p.approval_of_wfp || p.approval_concurrence_of_wfp || '',
+            paymentOfFBIFee: p.payment_of_fbi_fee || '',
+            conductOfFBI: p.conduct_of_fbi || '',
+            preparationOfFBIReport: p.preparation_of_fbi_report || '',
+            reviewOfFBIReport: p.review_of_fbi_report || '',
+            issuanceOfWorkOrderOfFPICTeam: p.issuance_of_work_order_of_fpic_team || '',
+            preFPICConference: p.pre_fpic_conference || '',
+            paymentOfFPICFee: p.payment_of_fpic_fee || '',
+            postingOfNotices: p.posting_of_notices || '',
+            firstCommunityAssembly: p.first_community_assembly || '',
+            secondCommunityAssembly: p.second_community_assembly || '',
+            consensusBuildingDecision: p.consensus_building_decision || '',
+            proceedToMOANegotiation: p.proceed_to_moa_negotiation || '',
+            issuanceResolutionToProceedToMOA: p.issuance_resolution_to_proceed_to_moa || '',
+            moaNegotiationPreparation: p.moa_negotiation_preparation || '',
+            moaValidationRatificationSigning: p.moa_validation_ratification_signing || '',
+            issuanceResolutionOfConsent: p.issuance_resolution_of_consent || '',
+            submissionOfFPICReport: p.submission_of_fpic_report || '',
+            reviewByRRT: p.review_by_rrt || '',
+            reviewByADOorLAO: p.review_by_ado_or_lao || '',
+            forComplianceOfFPICTeam: p.for_compliance_of_fpic_team || '',
+            cebDeliberation: p.ceb_deliberation || '',
+            cebApproved: p.ceb_approved || '',
+            preparationSigningCEBResolutionCP: p.preparation_signing_ceb_resolution_cp || '',
+            releaseOfCPToProponent: p.release_of_cp_to_proponent || '',
+            statusOfApplication: p.status_of_application || '',
+            hasOngoingFpic: p.has_ongoing_fpic || '',
+            remarks: p.remarks || '',
+            status: p.status || 'Ongoing',
+            _ongoing: p.status === 'Ongoing',
+            _pending: p.status === 'Pending',
+            importCollection: 'cp_projects',
+            raw_fields: p,
+            _display: `${p.proponent || 'N/A'} - ${p.project_name || 'N/A'}`
+          }));
+          
+          setMappings(mappingsFormat);
+          setMainMappings(mappingsFormat);
+          
+          // Also load user's old mappings for reference
           const userMappings = await getUserMappings(user.uid);
           const normalized = (userMappings || []).map((m) => ({ ...m, _display: buildDisplay(m) }));
-          setMappings(normalized);
-          setMainMappings(normalized);
+          
           // load user's import collections
           try {
               const imports = await getUserImportCollections(user.uid);
@@ -104,7 +177,8 @@ export function App() {
               const finalImports = checked.filter((c) => c.docsCount > 0).map((c) => c.importMeta);
 
               const list = [
-                { id: 'mappings', collectionName: 'mappings', displayName: 'mappings' },
+                { id: 'cp_projects', collectionName: 'cp_projects', displayName: 'CP Projects (Unified)', type: 'cp_projects' },
+                { id: 'mappings', collectionName: 'mappings', displayName: 'mappings (legacy)' },
                 ...finalImports.map((i) => {
                   const base = i.displayName || (i.collectionName && i.collectionName.startsWith(prefix) ? i.collectionName.slice(prefix.length) : i.collectionName);
                   return ({
@@ -123,10 +197,10 @@ export function App() {
               } catch (e) {
                 console.debug('App: availableCollections set', list);
               }
-            setSelectedCollection('mappings');
           } catch (e) {
             console.warn('Unable to load user import collections', e);
           }
+          setSelectedCollection('cp_projects'); // Always default to unified CP Projects table
         } catch (error) {
           console.error('Error loading mappings:', error);
           setMappings([]);
@@ -349,8 +423,237 @@ export function App() {
     }
   };
 
+  const handleDeleteAllByStatus = async (status) => {
+    try {
+      // Get all records with the given status from current mappings state
+      const allProjects = await getAllCPProjects();
+      const targets = allProjects.filter((p) => (p.status || 'Ongoing') === status);
+      const ids = targets.map((p) => p.id).filter(Boolean);
+      if (ids.length === 0) return { deleted: 0 };
+      const result = await deleteCPProjectsByIds(ids);
+      // Remove from local state
+      setMappings((prev) => prev.filter((m) => (m.status || 'Ongoing') !== status));
+      setMainMappings((prev) => (Array.isArray(prev) ? prev.filter((m) => (m.status || 'Ongoing') !== status) : prev));
+      return result;
+    } catch (error) {
+      console.error('Error deleting all by status:', error);
+      throw error;
+    }
+  };
+
   const handleImportMappings = async (records = [], options = {}) => {
     if (!currentUser || records.length === 0) return;
+
+    // Special handling for cp_projects - use dedicated import service
+    if (selectedCollection === 'cp_projects' || options.targetCollection === 'cp_projects') {
+      try {
+        const mode = options.mode && options.mode === 'replace' ? 'replace' : 'add';
+        const onProgress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
+        
+        // Determine status based on current tab
+        const activeTab = options.activeTab || 'ongoing'; // Default to ongoing
+        let defaultStatus = 'Ongoing';
+        if (activeTab === 'pending') {
+          defaultStatus = 'Pending';
+        } else if (activeTab === 'mappings') {
+          defaultStatus = 'Approved';
+        }
+        
+        console.log(`🚀 Importing to cp_projects table from ${activeTab} tab...`, { 
+          mode, 
+          recordCount: records.length,
+          defaultStatus 
+        });
+        
+        // Import using CP Projects service
+        const { importCPProjects } = await import('../lib/cpProjectsService.js');
+        
+        // Prefer raw sheets (original Excel data) for best field mapping accuracy.
+        // rawImport has: [{ sheetName, rawRecords: [{header_key: value, ...}], headers: [original headers] }]
+        let excelSheets;
+        const rawSheets = options.rawImport;
+        if (rawSheets && Array.isArray(rawSheets) && rawSheets.length > 0) {
+          excelSheets = rawSheets
+            .map(({ sheetName, rawRecords, headers: origHeaders }) => {
+              if (!rawRecords || rawRecords.length === 0) return null;
+              // Use original Excel headers if available, otherwise use sanitized keys
+              const headers = (origHeaders && origHeaders.length > 0)
+                ? origHeaders
+                : Object.keys(rawRecords[0]);
+              const rows = rawRecords.map((r) => {
+                const keys = Object.keys(r);
+                return headers.map((_, i) => r[keys[i]] || '');
+              });
+              return { sheetName, headers, rows };
+            })
+            .filter(Boolean);
+        } else {
+          // Fallback: records are already-processed objects — wrap as single sheet
+          excelSheets = [{
+            sheetName: 'Import',
+            headers: Object.keys(records[0] || {}),
+            rows: records.map((rec) => Object.values(rec).map((v) => v ?? ''))
+          }];
+        }
+        
+        const result = await importCPProjects({
+          excelSheets,
+          mode,
+          onProgress,
+          defaultStatus  // Pass default status for records without explicit status
+        });
+        
+        console.log('✅ Import to cp_projects complete:', result);
+        
+        // Reload cp_projects data
+        const cpProjects = await getAllCPProjects();
+        const mappingsFormat = cpProjects.map(p => ({
+          id: p.id,
+          surveyNumber: p.control_number || p.survey_number || '',
+          proponent: p.proponent || '',
+          applicant: p.proponent || '',
+          nameOfProject: p.project_name || '',
+          projectName: p.project_name || '',
+          typeOfProject: p.type_of_project || '',
+          natureOfProject: p.type_of_project || '',
+          location: p.location || p.province || '',
+          projectCost: p.project_cost || '',
+          totalArea: p.total_area || '',
+          area: p.total_area || '',
+          ancestralDomain: p.affected_ancestral_domain || '',
+          dateOfApplication: p.date_filed || '',
+          date_filed: p.date_filed || '',
+          region: p.region || '',
+          province: p.province || '',
+          municipality: p.municipality || '',
+          municipalities: p.municipality ? [p.municipality] : [],
+          barangays: p.barangay ? [p.barangay] : [],
+          icc: p.affected_icc || [],
+          iccs: Array.isArray(p.affected_icc) ? p.affected_icc.join(', ') : (p.affected_icc || ''),
+          // FBI / FPIC workflow step fields
+          reviewOfApplicationDocuments: p.review_of_application_documents || '',
+          needForFBI: p.need_for_fbi || '',
+          issuanceOfWorkOrder: p.issuance_of_work_order || '',
+          preFBIConference: p.pre_fbi_conference || '',
+          approvalOfWFP: p.approval_of_wfp || p.approval_concurrence_of_wfp || '',
+          paymentOfFBIFee: p.payment_of_fbi_fee || '',
+          conductOfFBI: p.conduct_of_fbi || '',
+          preparationOfFBIReport: p.preparation_of_fbi_report || '',
+          reviewOfFBIReport: p.review_of_fbi_report || '',
+          issuanceOfWorkOrderOfFPICTeam: p.issuance_of_work_order_of_fpic_team || '',
+          preFPICConference: p.pre_fpic_conference || '',
+          paymentOfFPICFee: p.payment_of_fpic_fee || '',
+          postingOfNotices: p.posting_of_notices || '',
+          firstCommunityAssembly: p.first_community_assembly || '',
+          secondCommunityAssembly: p.second_community_assembly || '',
+          consensusBuildingDecision: p.consensus_building_decision || '',
+          proceedToMOANegotiation: p.proceed_to_moa_negotiation || '',
+          issuanceResolutionToProceedToMOA: p.issuance_resolution_to_proceed_to_moa || '',
+          moaNegotiationPreparation: p.moa_negotiation_preparation || '',
+          moaValidationRatificationSigning: p.moa_validation_ratification_signing || '',
+          issuanceResolutionOfConsent: p.issuance_resolution_of_consent || '',
+          submissionOfFPICReport: p.submission_of_fpic_report || '',
+          reviewByRRT: p.review_by_rrt || '',
+          reviewByADOorLAO: p.review_by_ado_or_lao || '',
+          forComplianceOfFPICTeam: p.for_compliance_of_fpic_team || '',
+          cebDeliberation: p.ceb_deliberation || '',
+          cebApproved: p.ceb_approved || '',
+          preparationSigningCEBResolutionCP: p.preparation_signing_ceb_resolution_cp || '',
+          releaseOfCPToProponent: p.release_of_cp_to_proponent || '',
+          statusOfApplication: p.status_of_application || '',
+          hasOngoingFpic: p.has_ongoing_fpic || '',
+          remarks: p.remarks || '',
+          status: p.status || 'Ongoing',
+          _ongoing: p.status === 'Ongoing',
+          _pending: p.status === 'Pending',
+          importCollection: 'cp_projects',
+          raw_fields: p,
+          _display: `${p.proponent || 'N/A'} - ${p.project_name || 'N/A'}`
+        }));
+        
+        setMappings(mappingsFormat);
+        // Reload fresh data from Firestore so the UI reflects the new import
+        try {
+          const freshProjects = await getAllCPProjects();
+          const mappingsFormat = freshProjects.map(p => ({
+            id: p.id,
+            surveyNumber: p.control_number || p.survey_number || '',
+            proponent: p.proponent || '',
+            applicant: p.proponent || '',
+            nameOfProject: p.project_name || '',
+            projectName: p.project_name || '',
+            typeOfProject: p.type_of_project || '',
+            natureOfProject: p.type_of_project || '',
+            location: p.location || p.province || '',
+            projectCost: p.project_cost || '',
+            totalArea: p.total_area || '',
+            area: p.total_area || '',
+            ancestralDomain: p.affected_ancestral_domain || '',
+            dateOfApplication: p.date_filed || '',
+            date_filed: p.date_filed || '',
+            region: p.region || '',
+            province: p.province || '',
+            municipality: p.municipality || '',
+            municipalities: p.municipality ? [p.municipality] : [],
+            barangays: p.barangay ? [p.barangay] : [],
+            icc: p.affected_icc || [],
+            iccs: Array.isArray(p.affected_icc) ? p.affected_icc.join(', ') : (p.affected_icc || ''),
+            reviewOfApplicationDocuments: p.review_of_application_documents || '',
+            needForFBI: p.need_for_fbi || '',
+            issuanceOfWorkOrder: p.issuance_of_work_order || '',
+            preFBIConference: p.pre_fbi_conference || '',
+            approvalOfWFP: p.approval_of_wfp || p.approval_concurrence_of_wfp || '',
+            paymentOfFBIFee: p.payment_of_fbi_fee || '',
+            conductOfFBI: p.conduct_of_fbi || '',
+            preparationOfFBIReport: p.preparation_of_fbi_report || '',
+            reviewOfFBIReport: p.review_of_fbi_report || '',
+            issuanceOfWorkOrderOfFPICTeam: p.issuance_of_work_order_of_fpic_team || '',
+            preFPICConference: p.pre_fpic_conference || '',
+            paymentOfFPICFee: p.payment_of_fpic_fee || '',
+            postingOfNotices: p.posting_of_notices || '',
+            firstCommunityAssembly: p.first_community_assembly || '',
+            secondCommunityAssembly: p.second_community_assembly || '',
+            consensusBuildingDecision: p.consensus_building_decision || '',
+            proceedToMOANegotiation: p.proceed_to_moa_negotiation || '',
+            issuanceResolutionToProceedToMOA: p.issuance_resolution_to_proceed_to_moa || '',
+            moaNegotiationPreparation: p.moa_negotiation_preparation || '',
+            moaValidationRatificationSigning: p.moa_validation_ratification_signing || '',
+            issuanceResolutionOfConsent: p.issuance_resolution_of_consent || '',
+            submissionOfFPICReport: p.submission_of_fpic_report || '',
+            reviewByRRT: p.review_by_rrt || '',
+            reviewByADOorLAO: p.review_by_ado_or_lao || '',
+            forComplianceOfFPICTeam: p.for_compliance_of_fpic_team || '',
+            cebDeliberation: p.ceb_deliberation || '',
+            cebApproved: p.ceb_approved || '',
+            preparationSigningCEBResolutionCP: p.preparation_signing_ceb_resolution_cp || '',
+            releaseOfCPToProponent: p.release_of_cp_to_proponent || '',
+            statusOfApplication: p.status_of_application || '',
+            hasOngoingFpic: p.has_ongoing_fpic || '',
+            remarks: p.remarks || '',
+            status: p.status || 'Ongoing',
+            _ongoing: p.status === 'Ongoing',
+            _pending: p.status === 'Pending',
+            importCollection: 'cp_projects',
+            raw_fields: p,
+            _display: `${p.proponent || 'N/A'} - ${p.project_name || 'N/A'}`
+          }));
+          setMappings(mappingsFormat);
+          setMainMappings(mappingsFormat);
+          setSelectedCollection('cp_projects');
+        } catch (reloadErr) {
+          console.warn('Failed to reload after import:', reloadErr);
+        }
+        setToastTick((t) => t + 1);
+        setToast({ type: 'success', message: `Import complete: ${result.created || 0} records saved to CP Projects table.` });
+        onProgress(100);
+        return;
+      } catch (err) {
+        console.error('Import to cp_projects failed:', err);
+        setToastTick((t) => t + 1);
+        setToast({ type: 'error', message: err?.message || 'Failed to import to CP Projects.' });
+        throw err;
+      }
+    }
 
     // Lazy-load importService to avoid circular imports at module load time
     const { importMappings } = await import('../lib/importService.js');
@@ -453,6 +756,7 @@ export function App() {
         onViewProfile={handleViewProfile}
         onEditMapping={handleEditMapping}
         onDeleteMapping={handleDeleteMapping}
+        onDeleteAllByStatus={handleDeleteAllByStatus}
         onImportMappings={handleImportMappings}
         onPreviewImport={async (records = []) => {
           if (!records || !Array.isArray(records) || records.length === 0) return;
@@ -493,6 +797,78 @@ export function App() {
               try { console.log('App: sample user mapping ->', Array.isArray(userMappings) && userMappings.length ? JSON.parse(JSON.stringify(userMappings[0])) : null); } catch (e) { /* ignore */ }
               setMappings(userMappings);
               setMainMappings(userMappings);
+            } else if (collectionName === 'cp_projects') {
+              console.log('App: loading CP Projects from cp_projects table');
+              const cpProjects = await getAllCPProjects();
+              console.log('App: loaded cp_projects count ->', Array.isArray(cpProjects) ? cpProjects.length : 0);
+              
+              // Convert CP Projects format to mappings format for Dashboard compatibility
+              const mappingsFormat = cpProjects.map(p => ({
+                id: p.id,
+                surveyNumber: p.control_number || p.survey_number || '',
+                proponent: p.proponent || '',
+                applicant: p.proponent || '',
+                nameOfProject: p.project_name || '',
+                projectName: p.project_name || '',
+                typeOfProject: p.type_of_project || '',
+                natureOfProject: p.type_of_project || '',
+                location: p.location || p.province || '',
+                projectCost: p.project_cost || '',
+                totalArea: p.total_area || '',
+                area: p.total_area || '',
+                ancestralDomain: p.affected_ancestral_domain || '',
+                dateOfApplication: p.date_filed || '',
+                date_filed: p.date_filed || '',
+                region: p.region || '',
+                province: p.province || '',
+                municipality: p.municipality || '',
+                municipalities: p.municipality ? [p.municipality] : [],
+                barangays: p.barangay ? [p.barangay] : [],
+                icc: p.affected_icc || [],
+                iccs: Array.isArray(p.affected_icc) ? p.affected_icc.join(', ') : (p.affected_icc || ''),
+                // FBI / FPIC workflow step fields
+                reviewOfApplicationDocuments: p.review_of_application_documents || '',
+                needForFBI: p.need_for_fbi || '',
+                issuanceOfWorkOrder: p.issuance_of_work_order || '',
+                preFBIConference: p.pre_fbi_conference || '',
+                approvalOfWFP: p.approval_of_wfp || p.approval_concurrence_of_wfp || '',
+                paymentOfFBIFee: p.payment_of_fbi_fee || '',
+                conductOfFBI: p.conduct_of_fbi || '',
+                preparationOfFBIReport: p.preparation_of_fbi_report || '',
+                reviewOfFBIReport: p.review_of_fbi_report || '',
+                issuanceOfWorkOrderOfFPICTeam: p.issuance_of_work_order_of_fpic_team || '',
+                preFPICConference: p.pre_fpic_conference || '',
+                paymentOfFPICFee: p.payment_of_fpic_fee || '',
+                postingOfNotices: p.posting_of_notices || '',
+                firstCommunityAssembly: p.first_community_assembly || '',
+                secondCommunityAssembly: p.second_community_assembly || '',
+                consensusBuildingDecision: p.consensus_building_decision || '',
+                proceedToMOANegotiation: p.proceed_to_moa_negotiation || '',
+                issuanceResolutionToProceedToMOA: p.issuance_resolution_to_proceed_to_moa || '',
+                moaNegotiationPreparation: p.moa_negotiation_preparation || '',
+                moaValidationRatificationSigning: p.moa_validation_ratification_signing || '',
+                issuanceResolutionOfConsent: p.issuance_resolution_of_consent || '',
+                submissionOfFPICReport: p.submission_of_fpic_report || '',
+                reviewByRRT: p.review_by_rrt || '',
+                reviewByADOorLAO: p.review_by_ado_or_lao || '',
+                forComplianceOfFPICTeam: p.for_compliance_of_fpic_team || '',
+                cebDeliberation: p.ceb_deliberation || '',
+                cebApproved: p.ceb_approved || '',
+                preparationSigningCEBResolutionCP: p.preparation_signing_ceb_resolution_cp || '',
+                releaseOfCPToProponent: p.release_of_cp_to_proponent || '',
+                statusOfApplication: p.status_of_application || '',
+                hasOngoingFpic: p.has_ongoing_fpic || '',
+                remarks: p.remarks || '',
+                status: p.status || 'Ongoing',
+                _ongoing: p.status === 'Ongoing',
+                _pending: p.status === 'Pending',
+                importCollection: 'cp_projects',
+                raw_fields: p,
+                _display: `${p.proponent || 'N/A'} - ${p.project_name || 'N/A'}`
+              }));
+              
+              setMappings(mappingsFormat);
+              try { console.log('App: sample cp_project mapped ->', mappingsFormat.length ? JSON.parse(JSON.stringify(mappingsFormat[0])) : null); } catch (e) { /* ignore */ }
             } else {
               try {
                 console.log('App: loading import collection ->', collectionName);
