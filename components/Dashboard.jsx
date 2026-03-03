@@ -442,7 +442,25 @@ function Dashboard({
     if (h.includes('type of project') || h.includes('nature')) return displayValue(getBest(['typeOfProject', 'type_of_project', 'natureOfProject', 'nature_of_project', 'nature', 'projectNature', 'projectType']));
     if (h.includes('project location') || h === 'location') return displayValue(getBest(['location', 'projectLocation', 'project_location', 'province', 'provinceName', 'province_name', 'location_full']));
     if (h.includes('ancestral domain')) return displayValue(getBest(['ancestralDomain', 'affected_ancestral_domain', 'affectedAncestralDomain', 'ancestral_domains']));
-    if (h.includes('date of application') || h.includes('date of filing')) return displayValue(getBest(['dateOfApplication', 'date_of_application', 'date_filed', 'dateFiled', 'date_of_filing']));
+    if (h.includes('date of application') || h.includes('date of filing')) {
+      const raw = getBest(['dateOfApplication', 'date_of_application', 'date_filed', 'dateFiled', 'date_of_filing']);
+      if (!raw) return '-';
+      // Handle Firestore timestamp serialized as JSON string: {"seconds":...,"nanoseconds":...}
+      try {
+        const parsed = typeof raw === 'string' && raw.includes('seconds') ? JSON.parse(raw) : null;
+        if (parsed && parsed.seconds) {
+          const d = new Date(parsed.seconds * 1000);
+          return displayValue(d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'));
+        }
+      } catch(e) { /* ignore */ }
+      // Handle Date objects
+      if (raw instanceof Date) return displayValue(raw.getFullYear() + '-' + String(raw.getMonth()+1).padStart(2,'0') + '-' + String(raw.getDate()).padStart(2,'0'));
+      // Handle ISO date strings — show just the year if it's a plain year number
+      const s = String(raw);
+      const yearOnly = s.match(/^(19|20)\d{2}(-01-01.*)?$/);
+      if (yearOnly) return displayValue(s.slice(0, 4));
+      return displayValue(s);
+    }
     if (h.includes('project cost') || h === 'cost') return displayValue(getBest(['projectCost', 'project_cost', 'cost']));
     if (h.includes('status of application') || h === 'status of application') return displayValue(getBest(['statusOfApplication', 'status_of_application', 'remarks', 'application_status']));
     if (h === 'status') return displayValue(getBest(['status']));
@@ -638,7 +656,24 @@ function Dashboard({
       } catch (e) {
         // ignore
       }
-      const region = (canonicalRegion(rawRegion) || 'Unknown').toString();
+      // Use short canonical forms ("2", "CAR", "4A") to match the approved summary style.
+      // canonicalRegion() converts to long form ("Region II") which we do NOT want here.
+      const normalizeShort = (raw) => {
+        if (!raw) return 'Unknown';
+        const v = String(raw).trim();
+        const up = v.toUpperCase().replace(/[\u2013\u2014]/g, '-');
+        if (up.includes('CORDILLERA') || up === 'CAR' || up.startsWith('CAR')) return 'CAR';
+        if (/6\s*[-&/]?\s*7|VI\s*[-/&]\s*VII/.test(up)) return '6&7';
+        const romanToNum = { I:1,II:2,III:3,IV:4,V:5,VI:6,VII:7,VIII:8,IX:9,X:10,XI:11,XII:12,XIII:13 };
+        const rs = up.match(/(?:REGION\s*)?(XIII|XII|XI|X|IX|VIII|VII|VI|V|IV|III|II|I)\s*-?\s*(A|B)\b/);
+        if (rs) { const n = romanToNum[rs[1]]; return n ? `${n}${rs[2]}` : v; }
+        const r2 = up.match(/(?:REGION\s*)?(XIII|XII|XI|X|IX|VIII|VII|VI|V|IV|III|II|I)\b/);
+        if (r2) { const n = romanToNum[r2[1]]; return n ? String(n) : v; }
+        const ar = up.match(/(?:REGION\s+|\bR)(\d{1,2})\s*-?\s*(A|B)?$/) || up.match(/^(\d{1,2})\s*-?\s*(A|B)?$/);
+        if (ar) { const n = Number(ar[1]); if (n >= 1 && n <= 13) return ar[2] ? `${n}${ar[2]}` : String(n); }
+        return v;
+      };
+      const region = (normalizeShort(rawRegion) || 'Unknown').toString();
       if (!regionMap.has(region)) {
         regionMap.set(region, {
           region,
@@ -751,21 +786,21 @@ function Dashboard({
         cebDeliberation: 'ceb_deliberation',
       };
 
-      // Returns true only if a step field value is a real step status (done/pending/date/number)
-      // — NOT just any non-empty string (which catches wrongly-mapped data like ICC names, locations, etc.)
+      // Returns true only if the step is actually COMPLETED (Done / a date / complied).
+      // "Pending", "Ongoing", "For compliance" mean NOT done — do NOT count them.
       const isStepValue = (v) => {
         if (v === null || v === undefined) return false;
         const s = String(v).trim().toLowerCase();
         if (!s) return false;
-        // Explicit status words
-        if (['done', 'pending', 'completed', 'finished', 'ongoing', 'for compliance', 'complied'].some(w => s === w || s.startsWith(w))) return true;
+        // Completion words only — "pending" / "ongoing" are NOT done
+        if (['done', 'completed', 'finished', 'complied', 'yes'].some(w => s === w || s.startsWith(w))) return true;
         // Date-like: contains digits with separators (e.g. 2024-01-15, 01/15/2024, Jan 15 2024)
         if (/\d{1,4}[\-\/\.]\d{1,2}[\-\/\.]\d{1,4}/.test(s)) return true;
         if (/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/.test(s) && /\d/.test(s)) return true;
-        // Excel serial-like number (reasonable year range)
+        // Excel serial-like number (date serial range ~2010-2050)
         if (/^\d+$/.test(s)) {
           const n = Number(s);
-          if (n > 40000 && n < 55000) return true; // Excel date serial for ~2010-2050
+          if (n > 40000 && n < 55000) return true;
         }
         return false;
       };
@@ -774,11 +809,12 @@ function Dashboard({
         // 1. Direct camelCase key (set by App.jsx mappingsFormat)
         const direct = m[keyName];
         if (isStepValue(direct)) { obj[keyName] += 1; return; }
-        // 2. Snake_case in raw_fields (the Firestore document)
+        // 2. Snake_case directly on the document root (cp_projects Firestore docs)
         const snake = FIELD_SNAKE[keyName];
-        if (snake && m.raw_fields) {
-          const rfv = m.raw_fields[snake];
-          if (isStepValue(rfv)) { obj[keyName] += 1; return; }
+        if (snake) {
+          if (isStepValue(m[snake])) { obj[keyName] += 1; return; }
+          // 3. Snake_case inside raw_fields (legacy import fallback)
+          if (m.raw_fields && isStepValue(m.raw_fields[snake])) { obj[keyName] += 1; return; }
         }
       };
 
@@ -797,7 +833,9 @@ function Dashboard({
       inc('forComplianceOfFPICTeam');
       inc('cebDeliberation');
     });
-    const rows = Array.from(regionMap.values()).sort((a, b) => (b.total || 0) - (a.total || 0));
+    const ONGOING_REGION_ORDER = ['CAR','1','2','3','4A','4B','5','6&7','7','8','9','10','11','12','13'];
+    const ongoingRegionSortKey = (r) => { const i = ONGOING_REGION_ORDER.indexOf(r); return i >= 0 ? i : 99; };
+    const rows = Array.from(regionMap.values()).sort((a, b) => ongoingRegionSortKey(a.region) - ongoingRegionSortKey(b.region));
     try { console.debug('Dashboard: computeSummaryRows ->', { inputCount: records.length, rows }); } catch (e) { /* ignore */ }
     return rows;
   };
@@ -809,16 +847,56 @@ function Dashboard({
   // Compute summary rows grouped by year applied with counts per region
   const getYearFromMapping = (m) => {
     if (!m) return 'Unknown';
+    // Convert an Excel serial date number to a calendar year
+    const excelSerialToYear = (n) => {
+      // Excel epoch: Jan 1 1900 = serial 1 (with leap-year bug: serial 60 = Feb 29 1900, doesn't exist)
+      // Modern Excel serials for 1990-2030 are roughly 32874-47849
+      if (n < 25569 || n > 60000) return null; // out of plausible range
+      const msPerDay = 86400000;
+      const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+      const d = new Date(excelEpoch.getTime() + n * msPerDay);
+      const y = d.getUTCFullYear();
+      return (y >= 1900 && y <= 2100) ? String(y) : null;
+    };
+
     const candidates = [
       m.yearApplied, m.year_applied, m.year, m.DateApplied, m.dateApplied, m.date_of_application, m.dateOfApplication,
-      (m.raw_fields && (m.raw_fields.yearApplied || m.raw_fields.dateOfApplication || m.raw_fields.date)) || null,
+      m.date_filed, m.dateFiled,
+      (m.raw_fields && (m.raw_fields.year_applied || m.raw_fields.yearApplied || m.raw_fields.date_filed)) || null,
     ];
     for (const c of candidates) {
-      if (!c && c !== 0) continue;
+      if (c === null || c === undefined || c === '') continue;
       try {
-        if (typeof c === 'number' && c > 0) return String(c);
-        const s = String(c || '').trim();
-        const mMatch = s.match(/(\d{4})/);
+        // Handle Firestore Timestamp object (has .toDate() method)
+        if (typeof c === 'object' && c !== null && typeof c.toDate === 'function') {
+          const d = c.toDate();
+          if (d instanceof Date && !isNaN(d.getTime()) && d.getFullYear() >= 1900) return String(d.getFullYear());
+          continue;
+        }
+        // Handle Firestore timestamp JSON string: {"seconds":...,"nanoseconds":...}
+        if (typeof c === 'string' && c.includes('seconds')) {
+          const parsed = JSON.parse(c);
+          if (parsed && parsed.seconds) {
+            const y = new Date(parsed.seconds * 1000).getFullYear();
+            if (y >= 1900 && y <= 2100) return String(y);
+          }
+          continue;
+        }
+        if (typeof c === 'number' && c > 0) {
+          // If it's already a 4-digit year range, use it directly
+          if (c >= 1900 && c <= 2100) return String(Math.round(c));
+          // Try to interpret as Excel serial date
+          const y = excelSerialToYear(c);
+          if (y) return y;
+          // Otherwise skip — not a usable year
+          continue;
+        }
+        const s = String(c).trim();
+        // Try direct date parse first
+        const d = new Date(s);
+        if (!isNaN(d.getTime()) && d.getFullYear() >= 1900 && d.getFullYear() <= 2100) return String(d.getFullYear());
+        // Fallback: extract 4-digit year
+        const mMatch = s.match(/\b(19\d{2}|20\d{2})\b/);
         if (mMatch) return mMatch[1];
       } catch (e) {
         // ignore
@@ -828,7 +906,7 @@ function Dashboard({
     try {
       const dateStr = String(m.date || m.createdAt || m.created_at || '').trim();
       const d = new Date(dateStr);
-      if (!Number.isNaN(d.getFullYear())) return String(d.getFullYear());
+      if (!Number.isNaN(d.getFullYear()) && d.getFullYear() >= 1900) return String(d.getFullYear());
     } catch (e) { /* ignore */ }
     return 'Unknown';
   };
@@ -851,42 +929,54 @@ function Dashboard({
       const candidate = deriveRawRegion(m) || m.region || '';
       const detected = (detectRegionSheet(candidate) || '').toString();
       const up = String(detected || '').toUpperCase();
-      if (up.includes('CORDILLERA') || up === 'CAR') row.CAR += 1;
-      else if (up.includes('REGION I') || up === 'I') row.I += 1;
-      else if (up.includes('REGION II') || up === 'II') row.II += 1;
-      else if (up.includes('REGION III') || up === 'III') row.III += 1;
-      else if (up.includes('REGION IV-A') || up.includes('REGION IV') || up === 'REGION IV-A') row.IVA += 1;
-      else if (up.includes('REGION IV-B') || up === 'REGION IV-B') row.IVB += 1;
-      else if (up.includes('REGION V') || up === 'V') row.V += 1;
-      else if (up.includes('REGION VI') || up.includes('REGION VII')) row['VI/VII'] += 1;
-      else if (up.includes('REGION IX') || up === 'REGION IX') row.IX += 1;
-      else if (up.includes('REGION X') || up === 'REGION X') row.X += 1;
-      else if (up.includes('REGION XI') || up === 'REGION XI') row.XI += 1;
-      else if (up.includes('REGION XII') || up === 'REGION XII') row.XII += 1;
-      else if (up.includes('REGION XIII') || up === 'REGION XIII') row.XIII += 1;
+      // Use exact equality to avoid substring false-positives:
+      // e.g. "REGION II".includes("REGION I") === true, "REGION XI".includes("REGION X") === true
+      if (up === 'CAR' || up.includes('CORDILLERA')) row.CAR += 1;
+      else if (up === 'REGION I' || up === 'I') row.I += 1;
+      else if (up === 'REGION II' || up === 'II') row.II += 1;
+      else if (up === 'REGION III' || up === 'III') row.III += 1;
+      else if (up === 'REGION IV-A' || up === 'IVA') row.IVA += 1;
+      else if (up === 'REGION IV-B' || up === 'IVB') row.IVB += 1;
+      else if (up === 'REGION V' || up === 'V') row.V += 1;
+      else if (up === 'REGION VI' || up === 'REGION VII' || up === 'VI/VII') row['VI/VII'] += 1;
+      else if (up === 'REGION IX' || up === 'IX') row.IX += 1;
+      else if (up === 'REGION X' || up === 'X') row.X += 1;
+      else if (up === 'REGION XI' || up === 'XI') row.XI += 1;
+      else if (up === 'REGION XII' || up === 'XII') row.XII += 1;
+      else if (up === 'REGION XIII' || up === 'XIII') row.XIII += 1;
       else {
-        // If region not detected, attempt to map via canonicalRegion string
+        // If region not detected via detectRegionSheet, attempt canonicalRegion fallback
         const canon = String(canonicalRegion(candidate) || '').toUpperCase();
         if (canon === 'CAR') row.CAR += 1;
-        else if (canon === 'Region I'.toUpperCase() || canon === 'I') row.I += 1;
-        else if (canon === 'Region II'.toUpperCase() || canon === 'II') row.II += 1;
-        else if (canon === 'Region III'.toUpperCase() || canon === 'III') row.III += 1;
-        else if (canon === 'Region IV-A'.toUpperCase() || canon === 'IVA') row.IVA += 1;
-        else if (canon === 'Region IV-B'.toUpperCase() || canon === 'IVB') row.IVB += 1;
-        else if (canon === 'Region V'.toUpperCase() || canon === 'V') row.V += 1;
-        else if (canon === 'Region VI'.toUpperCase() || canon === 'Region VII'.toUpperCase()) row['VI/VII'] += 1;
-        else if (canon === 'Region IX'.toUpperCase() || canon === 'IX') row.IX += 1;
-        else if (canon === 'Region X'.toUpperCase() || canon === 'X') row.X += 1;
-        else if (canon === 'Region XI'.toUpperCase() || canon === 'XI') row.XI += 1;
-        else if (canon === 'Region XII'.toUpperCase() || canon === 'XII') row.XII += 1;
-        else if (canon === 'Region XIII'.toUpperCase() || canon === 'XIII') row.XIII += 1;
+        else if (canon === 'REGION I' || canon === 'I') row.I += 1;
+        else if (canon === 'REGION II' || canon === 'II') row.II += 1;
+        else if (canon === 'REGION III' || canon === 'III') row.III += 1;
+        else if (canon === 'REGION IV-A' || canon === 'IVA') row.IVA += 1;
+        else if (canon === 'REGION IV-B' || canon === 'IVB') row.IVB += 1;
+        else if (canon === 'REGION V' || canon === 'V') row.V += 1;
+        else if (canon === 'REGION VI' || canon === 'REGION VII' || canon === 'VI/VII') row['VI/VII'] += 1;
+        else if (canon === 'REGION IX' || canon === 'IX') row.IX += 1;
+        else if (canon === 'REGION X' || canon === 'X') row.X += 1;
+        else if (canon === 'REGION XI' || canon === 'XI') row.XI += 1;
+        else if (canon === 'REGION XII' || canon === 'XII') row.XII += 1;
+        else if (canon === 'REGION XIII' || canon === 'XIII') row.XIII += 1;
       }
     });
+
+    // Always seed every year from 1990 to max data year with zero rows (matches Excel)
+    const numericYears = Array.from(yearMap.keys()).filter(y => y !== 'Unknown' && !isNaN(Number(y))).map(Number);
+    const maxYear = numericYears.length > 0 ? Math.max(...numericYears) : new Date().getFullYear();
+    for (let y = 1990; y <= maxYear; y++) {
+      const ys = String(y);
+      if (!yearMap.has(ys)) {
+        yearMap.set(ys, { year: ys, CAR: 0, I: 0, II: 0, III: 0, IVA: 0, IVB: 0, V: 0, 'VI/VII': 0, IX: 0, X: 0, XI: 0, XII: 0, XIII: 0 });
+      }
+    }
 
     const rows = Array.from(yearMap.values()).sort((a, b) => {
       if (a.year === 'Unknown') return 1;
       if (b.year === 'Unknown') return -1;
-      return Number(b.year || 0) - Number(a.year || 0);
+      return Number(a.year || 0) - Number(b.year || 0); // ascending: oldest year first (matches Excel)
     });
     // compute totals per row
     rows.forEach((r) => {
@@ -898,11 +988,16 @@ function Dashboard({
   };
 
   // Compute counts by project type for 'Summary per project'
+  // Categories match the Excel file: "Summary per project" sheet columns
   const computeProjectTypeSummaryRows = (records = []) => {
     const categories = [
-      'Government Projects', 'Mining/ Mineral processing project', 'Energy Project', 'Forest Management project', 'EPR', 'Research project',
-      'Road projects', 'Sand and Gravel', 'Irrigation project', 'Livelihood Programs', 'Eco-Tourism Project',
-      'FLGMA', 'Telecommunication', 'Carbon Trading', 'Tree Cutting project', 'Plantation/ Pearl project', 'Water System Project', 'Others'
+      'Mining Project',
+      'Energy Project',
+      'Agro Industrial Project',
+      'Road Project',
+      'EPR',
+      'Irrigation Project',
+      'Others',
     ];
     const totals = categories.reduce((acc, c) => ({ ...acc, [c]: 0 }), {});
     const countsByRegion = {};
@@ -910,28 +1005,23 @@ function Dashboard({
     const detectProjectCategory = (m) => {
       if (!m) return 'Others';
       const candidates = [
-        m.typeOfProject, m.type_of_project, m.type, m.projectType, m.nameOfProject, m.projectName,
-        (m.raw_fields && (m.raw_fields.typeOfProject || m.raw_fields['Type of project'] || m.raw_fields['type'])) || null,
+        m.typeOfProject, m.type_of_project, m.type, m.projectType,
+        m.natureOfProject, m.nature_of_project,
+        (m.raw_fields && (
+          m.raw_fields.type_of_project ||
+          m.raw_fields['Type of project'] ||
+          m.raw_fields.typeOfProject ||
+          m.raw_fields.type
+        )) || null,
       ];
-      const text = String(candidates.find((c) => c) || '').toLowerCase();
+      const text = String(candidates.find((c) => c) || '').toLowerCase().trim();
       if (!text) return 'Others';
-      if (text.includes('government') || text.includes('govt') || text.includes('municipal') || text.includes('local government') || text.includes('national')) return 'Government Projects';
-      if (text.includes('mining') || text.includes('mineral')) return 'Mining/ Mineral processing project';
-      if (text.includes('energy') || text.includes('power')) return 'Energy Project';
-      if (text.includes('forest')) return 'Forest Management project';
+      if (text.includes('mining') || text.includes('mineral') || text.includes('quarry')) return 'Mining Project';
+      if (text.includes('energy') || text.includes('power') || text.includes('hydro') || text.includes('solar') || text.includes('geothermal') || text.includes('wind')) return 'Energy Project';
+      if (text.includes('agro') || text.includes('industrial') || text.includes('agri') || text.includes('plantation') || text.includes('farm')) return 'Agro Industrial Project';
+      if (text.includes('road') || text.includes('highway') || text.includes('bridge') || text.includes('infrastructure')) return 'Road Project';
       if (text.includes('epr')) return 'EPR';
-      if (text.includes('research')) return 'Research project';
-      if (text.includes('road')) return 'Road projects';
-      if (text.includes('sand') || text.includes('gravel')) return 'Sand and Gravel';
-      if (text.includes('irrig')) return 'Irrigation project';
-      if (text.includes('livelihood')) return 'Livelihood Programs';
-      if (text.includes('eco') || text.includes('tourism')) return 'Eco-Tourism Project';
-      if (text.includes('flgma')) return 'FLGMA';
-      if (text.includes('telecom') || text.includes('telecommunication')) return 'Telecommunication';
-      if (text.includes('carbon')) return 'Carbon Trading';
-      if (text.includes('tree') || text.includes('cutting')) return 'Tree Cutting project';
-      if (text.includes('plantation') || text.includes('pearl')) return 'Plantation/ Pearl project';
-      if (text.includes('water') || text.includes('water system')) return 'Water System Project';
+      if (text.includes('irrig') || text.includes('water') || text.includes('dam') || text.includes('river')) return 'Irrigation Project';
       return 'Others';
     };
 
@@ -945,6 +1035,78 @@ function Dashboard({
       if (totals.hasOwnProperty(cat)) totals[cat] += 1;
       else totals['Others'] += 1;
 
+      if (countsByRegion[region].hasOwnProperty(cat)) countsByRegion[region][cat] += 1;
+      else countsByRegion[region]['Others'] += 1;
+      countsByRegion[region].TOTAL = Object.keys(countsByRegion[region]).filter((k) => k !== 'TOTAL').reduce((s, k) => s + Number(countsByRegion[region][k] || 0), 0);
+    });
+
+    totals.TOTAL = Object.keys(totals).filter((k) => k !== 'TOTAL').reduce((s, k) => s + Number(totals[k] || 0), 0);
+    return { categories, countsByRegion, totals };
+  };
+
+  // Pending-specific project type summary — categories match "Final List of All Pending CP Applications.xlsx"
+  // Summary per project sheet: Government Projects | Mining/Mineral | Energy | Forest Management |
+  // EPR | Research | Road projects | Sand and Gravel | Irrigation | Livelihood | Eco-Tourism | FLGMA | Telecom | Carbon Trading
+  const computePendingProjectTypeSummaryRows = (records = []) => {
+    const categories = [
+      'Government Projects',
+      'Mining/Mineral Processing Project',
+      'Energy Project',
+      'Forest Management Project',
+      'EPR',
+      'Research Project',
+      'Road Projects',
+      'Sand and Gravel',
+      'Irrigation Project',
+      'Livelihood Programs',
+      'Eco-Tourism Project',
+      'FLGMA',
+      'Telecommunication',
+      'Carbon Trading',
+      'Others',
+    ];
+    const totals = categories.reduce((acc, c) => ({ ...acc, [c]: 0 }), {});
+    const countsByRegion = {};
+
+    const detectPendingCategory = (m) => {
+      if (!m) return 'Others';
+      const candidates = [
+        m.typeOfProject, m.type_of_project, m.type, m.projectType,
+        m.natureOfProject, m.nature_of_project,
+        (m.raw_fields && (
+          m.raw_fields.type_of_project ||
+          m.raw_fields['Type of Project'] ||
+          m.raw_fields.typeOfProject
+        )) || null,
+      ];
+      const text = String(candidates.find((c) => c) || '').toLowerCase().trim();
+      if (!text) return 'Others';
+      if (text.includes('government') || text.includes('gov')) return 'Government Projects';
+      if (text.includes('sand') || text.includes('gravel') || text.includes('quarry') && !text.includes('mining')) return 'Sand and Gravel';
+      if (text.includes('mining') || text.includes('mineral')) return 'Mining/Mineral Processing Project';
+      if (text.includes('carbon') || text.includes('carbon trading')) return 'Carbon Trading';
+      if (text.includes('telecommun') || text.includes('telecom') || text.includes('tower')) return 'Telecommunication';
+      if (text.includes('flgma') || text.includes('grazing management')) return 'FLGMA';
+      if (text.includes('eco-tourism') || text.includes('ecotourism') || text.includes('eco tourism') || text.includes('resort') || text.includes('tourism')) return 'Eco-Tourism Project';
+      if (text.includes('livelihood') || text.includes('livestock') || text.includes('agri') && !text.includes('agro') || text.includes('organic') || text.includes('crops')) return 'Livelihood Programs';
+      if (text.includes('irrig') || text.includes('dam') || text.includes('water system') || text.includes('multipurpose')) return 'Irrigation Project';
+      if (text.includes('road') || text.includes('highway') || text.includes('bridge') || text.includes('infrastructure')) return 'Road Projects';
+      if (text.includes('research') || text.includes('study') || text.includes('feasibility')) return 'Research Project';
+      if (text.includes('epr') || text.includes('priority right')) return 'EPR';
+      if (text.includes('forest') || text.includes('plantation') || text.includes('ifma') || text.includes('flgm') || text.includes('tree') || text.includes('timber')) return 'Forest Management Project';
+      if (text.includes('energy') || text.includes('power') || text.includes('hydro') || text.includes('solar') || text.includes('geothermal') || text.includes('wind') || text.includes('electric')) return 'Energy Project';
+      return 'Others';
+    };
+
+    (records || []).forEach((m) => {
+      const cat = detectPendingCategory(m);
+      const regionRaw = m.region || deriveRawRegion(m) || 'Unknown';
+      const region = String(canonicalRegion(regionRaw) || regionRaw || 'Unknown');
+      if (!countsByRegion[region]) {
+        countsByRegion[region] = categories.reduce((acc, c) => ({ ...acc, [c]: 0 }), { TOTAL: 0 });
+      }
+      if (totals.hasOwnProperty(cat)) totals[cat] += 1;
+      else totals['Others'] += 1;
       if (countsByRegion[region].hasOwnProperty(cat)) countsByRegion[region][cat] += 1;
       else countsByRegion[region]['Others'] += 1;
       countsByRegion[region].TOTAL = Object.keys(countsByRegion[region]).filter((k) => k !== 'TOTAL').reduce((s, k) => s + Number(countsByRegion[region][k] || 0), 0);
@@ -1001,13 +1163,14 @@ function Dashboard({
   
   const ongoingRecords = Array.isArray(mappings)
     ? (isSelectedCollectionCPProjects 
-        ? mappings.filter((m) => m._ongoing === true || String(m.status).toLowerCase() === 'ongoing')
+        ? mappings.filter((m) => m._ongoing === true)
         : isSelectedCollectionOngoing 
         ? mappings 
         : mappings.filter((m) => isOngoingMapping(m)))
     : [];
 
   const ongoingSummaryRows = computeSummaryRows(ongoingRecords || []);
+  const { categories: ongoingProjectCategories, countsByRegion: ongoingProjectCountsByRegion, totals: ongoingProjectCounts } = computeProjectTypeSummaryRows(ongoingRecords || []);
   const ongoingSummaryTotals = React.useMemo(() => {
     const totals = {
       region: 'Total',
@@ -1875,7 +2038,7 @@ function Dashboard({
   // Pending records (detection by status/_pending/pending flag) with subtabs
   const pendingRecordsAll = Array.isArray(mappings)
     ? (isSelectedCollectionCPProjects
-        ? mappings.filter((m) => m._pending === true || String(m.status).toLowerCase() === 'pending')
+        ? mappings.filter((m) => m._pending === true)
         : isSelectedCollectionPending 
         ? mappings 
         : mappings.filter((m) => isPendingMapping(m)))
@@ -1953,12 +2116,15 @@ function Dashboard({
       region1: 'Region I', region2: 'Region II', region3: 'Region III', region4a: 'Region IV-A', region4b: 'Region IV-B', region5: 'Region V', region9: 'Region IX', region10: 'Region X', region11: 'Region XI', region12: 'Region XII', region13: 'Region XIII'
     };
     if (Object.prototype.hasOwnProperty.call(regionMap, id)) {
+      const target = regionMap[id]; // e.g. 'Region XI'
       return prefiltered.filter((rec) => {
         const candidate = deriveRawRegion(rec) || rec.region || '';
         const detected = detectRegionSheet(candidate);
-        if (detected === regionMap[id]) return true;
+        if (detected === target) return true;
         const canon = canonicalRegion(candidate) || '';
-        return canon === regionMap[id] || String(candidate || '').toUpperCase().includes(String(regionMap[id] || '').toUpperCase());
+        if (canon === target) return true;
+        // Exact string match only — avoid 'Region I'.includes('Region XI') false positives
+        return String(candidate || '').trim().toLowerCase() === target.toLowerCase();
       });
     }
 
@@ -1972,7 +2138,7 @@ function Dashboard({
 
   const pendingSummaryRows = computeSummaryRows(filteredPendingRecords || []);
   const pendingYearSummaryRows = computeYearSummaryRows(filteredPendingRecords || []);
-  const { categories: pendingProjectCategories, countsByRegion: pendingProjectCountsByRegion, totals: pendingProjectCounts } = computeProjectTypeSummaryRows(filteredPendingRecords || []);
+  const { categories: pendingProjectCategories, countsByRegion: pendingProjectCountsByRegion, totals: pendingProjectCounts } = computePendingProjectTypeSummaryRows(filteredPendingRecords || []);
   const pendingSummaryTotals = React.useMemo(() => {
     const totals = {
       region: 'Total',
@@ -2955,6 +3121,26 @@ function Dashboard({
                   </button>
                 </div>
 
+                {activeTab === 'ongoing' && (
+                  <button
+                    type="button"
+                    onClick={() => handleConfirmImport('replace')}
+                    className="w-full px-4 py-2 rounded-lg bg-orange-600 text-white hover:bg-orange-700 transition font-semibold text-sm"
+                  >
+                    ⚠ Replace All Ongoing (Overwrite)
+                  </button>
+                )}
+
+                {activeTab === 'pending' && (
+                  <button
+                    type="button"
+                    onClick={() => handleConfirmImport('replace')}
+                    className="w-full px-4 py-2 rounded-lg bg-orange-600 text-white hover:bg-orange-700 transition font-semibold text-sm"
+                  >
+                    ⚠ Replace All Pending (Overwrite)
+                  </button>
+                )}
+
                 {(importPreparedDocs && importPreparedDocs.length) || importPreviewRecords.length > 0 && (
                   <div className="flex gap-3 w-full mt-3">
                     <button
@@ -3415,7 +3601,7 @@ function Dashboard({
                       <thead className="bg-[#0A2D55]/5 border-b border-[#0A2D55]/15">
                         <tr>
                           {[
-                            'YEAR APPLIED', 'CAR', 'I', 'II', 'III', 'IVA', 'IVB', 'V', '6/7', 'IX', 'X', 'XI', 'XII', 'XIII', 'TOTAL'
+                            'YEAR APPLIED', 'CAR', 'I', 'II', 'III', 'IVA', 'IVB', 'V', 'VI/VII', 'IX', 'X', 'XI', 'XII', 'XIII', 'TOTAL'
                           ].map((h, i) => (
                             <th key={i} title={h} className="px-3 sm:px-4 py-2 text-left text-[11px] sm:text-[12px] font-semibold text-[#0A2D55] normal-case leading-snug whitespace-nowrap truncate max-w-[220px]">{h}</th>
                           ))}
@@ -3428,25 +3614,40 @@ function Dashboard({
                           </tr>
                         ) : (
                           <>
-                            {pendingYearSummaryRows.map((r, idx) => (
+                            {pendingYearSummaryRows.filter(r => r.year !== 'Unknown').map((r, idx) => (
                               <tr key={r.year || idx} className="border-b border-[#0A2D55]/10">
                                 <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.year}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal font-semibold">{r.CAR}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.I}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.II}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.III}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.IVA}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.IVB}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.V}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r['VI/VII']}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.IX}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.X}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.XI}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.XII}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.XIII}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.TOTAL}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal font-semibold">{r.CAR || 0}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.I || 0}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.II || 0}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.III || 0}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.IVA || 0}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.IVB || 0}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.V || 0}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r['VI/VII'] || 0}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.IX || 0}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.X || 0}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.XI || 0}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.XII || 0}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.XIII || 0}</td>
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.TOTAL || 0}</td>
                               </tr>
                             ))}
+                            {/* TOTAL row */}
+                            {(() => {
+                              const dataRows = pendingYearSummaryRows.filter(r => r.year !== 'Unknown');
+                              const cols = ['CAR','I','II','III','IVA','IVB','V','VI/VII','IX','X','XI','XII','XIII','TOTAL'];
+                              const totals = {};
+                              cols.forEach(c => { totals[c] = dataRows.reduce((s, r) => s + (Number(r[c]) || 0), 0); });
+                              return (
+                                <tr className="border-t-2 border-[#0A2D55]/30 bg-[#0A2D55]/5 font-bold">
+                                  <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55] whitespace-normal">TOTAL</td>
+                                  {cols.map(c => (
+                                    <td key={c} className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55] whitespace-normal">{totals[c]}</td>
+                                  ))}
+                                </tr>
+                              );
+                            })()}
                           </>
                         )}
                       </tbody>
@@ -3495,7 +3696,7 @@ function Dashboard({
                     const regionTableTabs = ['car', 'region1', 'region2', 'region3', 'region4a', 'region4b', 'region5', 'region6-7', 'region9', 'region10', 'region11', 'region12', 'region13', 'road-projects'];
                     if (regionTableTabs.includes(String(currentPendingTab.id || '').toLowerCase())) {
                       const PENDING_REGION_HEADERS = [
-                        'NO', 'REGION', 'DATE OF FILING OF CP APPLICATION', 'NAME OF PROPONENT', 'NAME OF PROJECT', 'Project Cost', 'LOCATION', 'Type of Project', 'AFFECTED AD/ICC/IP', '(for CP with ongoing FPIC)', 'STATUS OF APPLICATION', 'STATUS'
+                        'NO', 'REGION', 'DATE OF FILING OF CP APPLICATION', 'NAME OF PROPONENT', 'NAME OF PROJECT', 'Project Cost', 'LOCATION', 'Type of Project', 'AFFECTED AD/ICC/IP (for CP with ongoing FPIC)', 'STATUS OF APPLICATION', 'STATUS'
                       ];
                       return (
                         <div className="overflow-x-auto">
@@ -4011,6 +4212,42 @@ function Dashboard({
                         </tbody>
                       </table>
 
+                    </div>
+                  ) : currentOngoingTab.id === 'summary-per-project' ? (
+                    <div className="overflow-x-auto">
+                      <table className="min-w-[1100px] w-full table-auto">
+                        <thead className="bg-[#0A2D55]/5 border-b border-[#0A2D55]/15">
+                          <tr>
+                            <th className="px-3 sm:px-4 py-2 text-left text-[11px] sm:text-[12px] font-semibold text-[#0A2D55] normal-case leading-snug whitespace-nowrap truncate max-w-[220px]">REGION</th>
+                            {(ongoingProjectCategories || []).map((h, i) => (
+                              <th key={i} title={h} className="px-3 sm:px-4 py-2 text-left text-[11px] sm:text-[12px] font-semibold text-[#0A2D55] normal-case leading-snug whitespace-nowrap truncate max-w-[220px]">{h}</th>
+                            ))}
+                            <th className="px-3 sm:px-4 py-2 text-left text-[11px] sm:text-[12px] font-semibold text-[#0A2D55] normal-case leading-snug whitespace-nowrap truncate max-w-[220px]">TOTAL</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(() => {
+                            const defaultRegions = ['CAR','Region I','Region II','Region III','Region IV-A','Region IV-B','Region V','Region VI','Region VII','Region IX','Region X','Region XI','Region XII','Region XIII'];
+                            const regionKeys = (Object.keys(ongoingProjectCountsByRegion || {}).length ? Object.keys(ongoingProjectCountsByRegion).sort() : defaultRegions);
+                            return regionKeys.map((region) => (
+                              <tr key={region} className="border-b border-[#0A2D55]/10">
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal font-semibold">{region}</td>
+                                {(ongoingProjectCategories || []).map((cat, i) => (
+                                  <td key={i} className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{(ongoingProjectCountsByRegion[region] && ongoingProjectCountsByRegion[region][cat]) || 0}</td>
+                                ))}
+                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{(ongoingProjectCountsByRegion[region] && ongoingProjectCountsByRegion[region].TOTAL) || 0}</td>
+                              </tr>
+                            ));
+                          })()}
+                          <tr className="font-semibold bg-[#0A2D55]/5">
+                            <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">Total</td>
+                            {(ongoingProjectCategories || []).map((cat, i) => (
+                              <td key={i} className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{ongoingProjectCounts[cat] || 0}</td>
+                            ))}
+                            <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{ongoingProjectCounts.TOTAL || 0}</td>
+                          </tr>
+                        </tbody>
+                      </table>
                     </div>
                   ) : (
                     <div className="overflow-x-auto">
