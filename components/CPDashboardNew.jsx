@@ -44,6 +44,7 @@ function CPDashboardNew({ user, onLogout }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
+  const [importMode, setImportMode] = useState('replace');
   const [alert, setAlert] = useState(null);
   const [showViewModal, setShowViewModal] = useState(false);
   const [selectedProject, setSelectedProject] = useState(null);
@@ -247,10 +248,15 @@ function CPDashboardNew({ user, onLogout }) {
         return;
       }
 
+      // Derive defaultStatus from the active tab
+      const tabStatusMap = { approved: 'Approved', pending: 'Pending', ongoing: 'Ongoing' };
+      const defaultStatus = tabStatusMap[activeTab] || 'Approved';
+
       // Import to Firestore
       const result = await importCPProjects({
         excelSheets,
-        mode: 'add',
+        mode: importMode,
+        defaultStatus,
         onProgress: setImportProgress,
         batchId: `import_${Date.now()}`
       });
@@ -515,6 +521,32 @@ function CPDashboardNew({ user, onLogout }) {
                 <option key={region} value={region}>{region}</option>
               ))}
             </select>
+
+            {/* Import Mode Toggle */}
+            <div className="flex rounded-lg border border-gray-300 overflow-hidden">
+              <button
+                onClick={() => setImportMode('replace')}
+                className={`px-3 py-2 text-sm font-medium transition-colors ${
+                  importMode === 'replace'
+                    ? 'bg-orange-500 text-white'
+                    : 'bg-white text-gray-600 hover:bg-gray-50'
+                }`}
+                title="Delete existing records of this status, then import"
+              >
+                Replace
+              </button>
+              <button
+                onClick={() => setImportMode('add')}
+                className={`px-3 py-2 text-sm font-medium transition-colors ${
+                  importMode === 'add'
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-white text-gray-600 hover:bg-gray-50'
+                }`}
+                title="Add imported records alongside existing ones"
+              >
+                Add
+              </button>
+            </div>
 
             {/* Import Button */}
             <button
