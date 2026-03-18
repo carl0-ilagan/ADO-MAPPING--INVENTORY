@@ -84,6 +84,7 @@ function Dashboard({
   const [importPreparedDocs, setImportPreparedDocs] = useState([]);
   const [importInvalidSheets, setImportInvalidSheets] = useState([]);
   const [importRawSheets, setImportRawSheets] = useState([]);
+  const [importSourceFileName, setImportSourceFileName] = useState('');
   const [importCollectionName, setImportCollectionName] = useState('');
   const [showInvalidDetails, setShowInvalidDetails] = useState(false);
 
@@ -199,9 +200,31 @@ function Dashboard({
   const deriveRawRegion = (m) => {
     if (!m) return '';
     try {
+      // Prefer source sheet when available; this is the most reliable region
+      // origin for workbook imports and helps recover legacy mis-mapped rows.
+      const sourceSheet =
+        m.source_sheet ||
+        m.sourceSheet ||
+        (m.raw_fields && (m.raw_fields.source_sheet || m.raw_fields.sheet_name || m.raw_fields.sheetName));
+      if (sourceSheet) {
+        const detectedFromSheet = detectRegionSheet(String(sourceSheet));
+        if (detectedFromSheet) return String(sourceSheet);
+      }
+
+      if (m.raw_fields && (m.raw_fields.region || m.raw_fields.sheet)) return String(m.raw_fields.region || m.raw_fields.sheet);
+      if (m.raw_fields && typeof m.raw_fields === 'object') {
+        for (const k of Object.keys(m.raw_fields || {})) {
+          try {
+            const lk = String(k || '').toLowerCase();
+            if (lk.includes('region') || lk === 'ro' || lk.includes('regional office')) {
+              const v = m.raw_fields[k];
+              if (v && String(v).trim() !== '') return String(v);
+            }
+          } catch (e) { }
+        }
+      }
       if (m.region) return String(m.region);
       if (m.ongoing && m.ongoing.region) return String(m.ongoing.region);
-      if (m.raw_fields && (m.raw_fields.region || m.raw_fields.sheet)) return String(m.raw_fields.region || m.raw_fields.sheet);
       // scan top-level for any key that contains 'region' or 'sheet'
       for (const k of Object.keys(m || {})) {
         try {
@@ -595,7 +618,6 @@ function Dashboard({
   const PENDING_SUBTABS = [
     { id: 'summary', label: 'Summary' },
     { id: 'summary-per-project', label: 'Summary per project' },
-    { id: 'all-years-summary', label: 'All Years (All Statuses)' },
     { id: 'car', label: 'CAR' },
     { id: 'region1', label: 'Region 1' },
     { id: 'region2', label: 'Region 2' },
@@ -863,7 +885,18 @@ function Dashboard({
     const candidates = [
       m.yearApplied, m.year_applied, m.year, m.DateApplied, m.dateApplied, m.date_of_application, m.dateOfApplication,
       m.date_filed, m.dateFiled,
-      (m.raw_fields && (m.raw_fields.year_applied || m.raw_fields.yearApplied || m.raw_fields.date_filed)) || null,
+      (m.raw_fields && (
+        m.raw_fields.year_applied ||
+        m.raw_fields.yearApplied ||
+        m.raw_fields.YEAR ||
+        m.raw_fields['YEAR APPLIED'] ||
+        m.raw_fields.date_filed ||
+        m.raw_fields.dateFiled ||
+        m.raw_fields['DATE FILED'] ||
+        m.raw_fields['DATE OF FILING OF CP APPLICATION'] ||
+        m.raw_fields['DATE OF APPLICATION'] ||
+        m.raw_fields['DATE APPLIED']
+      )) || null,
     ];
     for (const c of candidates) {
       if (c === null || c === undefined || c === '') continue;
@@ -914,11 +947,56 @@ function Dashboard({
 
   const computeYearSummaryRows = (records = []) => {
     const yearMap = new Map();
+    const toPendingRegionBucket = (rawValue) => {
+      const raw = String(rawValue || '').trim();
+      if (!raw) return '';
+
+      const up = raw.toUpperCase().replace(/[\u2013\u2014]/g, '-');
+      if (up.includes('CORDILLERA') || up === 'CAR' || up.startsWith('CAR')) return 'CAR';
+
+      // Explicit 6/7 combined bucket used by pending workbook
+      if (/VI\s*[/&-]\s*VII|6\s*[/&-]\s*7|REGION\s*67/.test(up)) return 'VI/VII';
+
+      const romanToBucket = {
+        I: 'I', II: 'II', III: 'III', IV: '', V: 'V', VI: 'VI/VII', VII: 'VI/VII',
+        VIII: '', IX: 'IX', X: 'X', XI: 'XI', XII: 'XII', XIII: 'XIII'
+      };
+
+      // Region IV with suffix
+      const ivSuffix = up.match(/(?:REGION\s*)?IV\s*-?\s*(A|B)\b/);
+      if (ivSuffix) return ivSuffix[1] === 'A' ? 'IVA' : 'IVB';
+
+      // Roman region labels
+      const roman = up.match(/(?:REGION\s*)?(XIII|XII|XI|X|IX|VIII|VII|VI|V|IV|III|II|I)\b/);
+      if (roman && romanToBucket[roman[1]]) return romanToBucket[roman[1]];
+
+      // Arabic with optional A/B suffix
+      const arabic = up.match(/(?:REGION\s+|\bR)(\d{1,2})\s*-?\s*(A|B)?\b/) || up.match(/^(\d{1,2})\s*-?\s*(A|B)?$/);
+      if (arabic) {
+        const n = Number(arabic[1]);
+        const suffix = arabic[2] ? arabic[2].toUpperCase() : '';
+        if (n === 4 && suffix === 'A') return 'IVA';
+        if (n === 4 && suffix === 'B') return 'IVB';
+        if (n === 6 || n === 7) return 'VI/VII';
+        if (n === 1) return 'I';
+        if (n === 2) return 'II';
+        if (n === 3) return 'III';
+        if (n === 5) return 'V';
+        if (n === 9) return 'IX';
+        if (n === 10) return 'X';
+        if (n === 11) return 'XI';
+        if (n === 12) return 'XII';
+        if (n === 13) return 'XIII';
+      }
+
+      return '';
+    };
+
     const ensureRow = (year) => {
       if (!yearMap.has(year)) {
         yearMap.set(year, {
           year,
-          CAR: 0, I: 0, II: 0, III: 0, IVA: 0, IVB: 0, V: 0, 'VI/VII': 0, VIII: 0, IX: 0, X: 0, XI: 0, XII: 0, XIII: 0,
+          CAR: 0, I: 0, II: 0, III: 0, IVA: 0, IVB: 0, V: 0, 'VI/VII': 0, IX: 0, X: 0, XI: 0, XII: 0, XIII: 0,
         });
       }
       return yearMap.get(year);
@@ -928,41 +1006,15 @@ function Dashboard({
       const year = getYearFromMapping(m) || 'Unknown';
       const row = ensureRow(year);
       const candidate = deriveRawRegion(m) || m.region || '';
-      const detected = (detectRegionSheet(candidate) || '').toString();
-      const up = String(detected || '').toUpperCase();
-      // Use exact equality to avoid substring false-positives:
-      // e.g. "REGION II".includes("REGION I") === true, "REGION XI".includes("REGION X") === true
-      if (up === 'CAR' || up.includes('CORDILLERA')) row.CAR += 1;
-      else if (up === 'REGION I' || up === 'I') row.I += 1;
-      else if (up === 'REGION II' || up === 'II') row.II += 1;
-      else if (up === 'REGION III' || up === 'III') row.III += 1;
-      else if (up === 'REGION IV-A' || up === 'IVA') row.IVA += 1;
-      else if (up === 'REGION IV-B' || up === 'IVB') row.IVB += 1;
-      else if (up === 'REGION V' || up === 'V') row.V += 1;
-      else if (up === 'REGION VI' || up === 'REGION VII' || up === 'VI/VII') row['VI/VII'] += 1;
-      else if (up === 'REGION VIII' || up === 'VIII') row.VIII += 1;
-      else if (up === 'REGION IX' || up === 'IX') row.IX += 1;
-      else if (up === 'REGION X' || up === 'X') row.X += 1;
-      else if (up === 'REGION XI' || up === 'XI') row.XI += 1;
-      else if (up === 'REGION XII' || up === 'XII') row.XII += 1;
-      else if (up === 'REGION XIII' || up === 'XIII') row.XIII += 1;
-      else {
-        // If region not detected via detectRegionSheet, attempt canonicalRegion fallback
-        const canon = String(canonicalRegion(candidate) || '').toUpperCase();
-        if (canon === 'CAR') row.CAR += 1;
-        else if (canon === 'REGION I' || canon === 'I') row.I += 1;
-        else if (canon === 'REGION II' || canon === 'II') row.II += 1;
-        else if (canon === 'REGION III' || canon === 'III') row.III += 1;
-        else if (canon === 'REGION IV-A' || canon === 'IVA') row.IVA += 1;
-        else if (canon === 'REGION IV-B' || canon === 'IVB') row.IVB += 1;
-        else if (canon === 'REGION V' || canon === 'V') row.V += 1;
-        else if (canon === 'REGION VI' || canon === 'REGION VII' || canon === 'VI/VII') row['VI/VII'] += 1;
-        else if (canon === 'REGION VIII' || canon === 'VIII') row.VIII += 1;
-        else if (canon === 'REGION IX' || canon === 'IX') row.IX += 1;
-        else if (canon === 'REGION X' || canon === 'X') row.X += 1;
-        else if (canon === 'REGION XI' || canon === 'XI') row.XI += 1;
-        else if (canon === 'REGION XII' || canon === 'XII') row.XII += 1;
-        else if (canon === 'REGION XIII' || canon === 'XIII') row.XIII += 1;
+      const normalizedDetected = detectRegionSheet(candidate);
+      const bucket =
+        toPendingRegionBucket(normalizedDetected) ||
+        toPendingRegionBucket(canonicalRegion(candidate)) ||
+        toPendingRegionBucket(candidate) ||
+        toPendingRegionBucket(m?.source_sheet || m?.raw_fields?.source_sheet || '');
+
+      if (bucket && Object.prototype.hasOwnProperty.call(row, bucket)) {
+        row[bucket] += 1;
       }
     });
 
@@ -972,7 +1024,7 @@ function Dashboard({
     for (let y = 1990; y <= maxYear; y++) {
       const ys = String(y);
       if (!yearMap.has(ys)) {
-        yearMap.set(ys, { year: ys, CAR: 0, I: 0, II: 0, III: 0, IVA: 0, IVB: 0, V: 0, 'VI/VII': 0, VIII: 0, IX: 0, X: 0, XI: 0, XII: 0, XIII: 0 });
+        yearMap.set(ys, { year: ys, CAR: 0, I: 0, II: 0, III: 0, IVA: 0, IVB: 0, V: 0, 'VI/VII': 0, IX: 0, X: 0, XI: 0, XII: 0, XIII: 0 });
       }
     }
 
@@ -984,7 +1036,7 @@ function Dashboard({
     // compute totals per row
     rows.forEach((r) => {
       r.TOTAL = (
-        Number(r.CAR || 0) + Number(r.I || 0) + Number(r.II || 0) + Number(r.III || 0) + Number(r.IVA || 0) + Number(r.IVB || 0) + Number(r.V || 0) + Number(r['VI/VII'] || 0) + Number(r.VIII || 0) + Number(r.IX || 0) + Number(r.X || 0) + Number(r.XI || 0) + Number(r.XII || 0) + Number(r.XIII || 0)
+        Number(r.CAR || 0) + Number(r.I || 0) + Number(r.II || 0) + Number(r.III || 0) + Number(r.IVA || 0) + Number(r.IVB || 0) + Number(r.V || 0) + Number(r['VI/VII'] || 0) + Number(r.IX || 0) + Number(r.X || 0) + Number(r.XI || 0) + Number(r.XII || 0) + Number(r.XIII || 0)
       );
     });
     return rows;
@@ -2142,7 +2194,54 @@ function Dashboard({
   // Pending records (detection by status/_pending/pending flag) with subtabs
   const pendingRecordsAll = Array.isArray(mappings)
     ? (isSelectedCollectionCPProjects
-        ? mappings.filter((m) => m._pending === true && isProjectLikeRecord(m))
+        ? mappings.filter((m) => {
+            const worksheetNo = String(m?.worksheet_no || m?.worksheetNo || '').trim();
+            const rawRegion = deriveRawRegion(m) || m?.region || '';
+            const detectedRegion = String(
+              detectRegionSheet(rawRegion) ||
+              canonicalRegion(rawRegion) ||
+              rawRegion ||
+              ''
+            ).toUpperCase().trim();
+            const validPendingRegion = [
+              'CAR', 'REGION I', 'REGION II', 'REGION III', 'REGION IV-A', 'REGION IV-B',
+              'REGION V', 'REGION VI', 'REGION VII', 'REGION IX', 'REGION X', 'REGION XI',
+              'REGION XII', 'REGION XIII', 'I', 'II', 'III', 'IVA', 'IVB', 'V', 'VI/VII',
+              'IX', 'X', 'XI', 'XII', 'XIII', '1', '2', '3', '4A', '4B', '5', '6', '7', '6&7', '9', '10', '11', '12', '13'
+            ].includes(detectedRegion);
+
+            const hasWorkbookStatusFields = Boolean(
+              String(m?.statusOfApplication || '').trim() ||
+              String(m?.status_of_application || '').trim() ||
+              String(m?.workflowStatus || '').trim() ||
+              String(m?.workflow_status || '').trim() ||
+              String(m?.raw_fields?.['STATUS OF APPLICATION'] || '').trim() ||
+              String(m?.raw_fields?.status_of_application || '').trim() ||
+              String(m?.raw_fields?.STATUS || '').trim() ||
+              String(m?.raw_fields?.workflow_status || '').trim()
+            );
+
+            const hasWorkbookCoreFields = Boolean(
+              String(m?.dateFiled || '').trim() ||
+              String(m?.date_filed || '').trim() ||
+              String(m?.typeOfProject || '').trim() ||
+              String(m?.type_of_project || '').trim() ||
+              String(m?.location || '').trim() ||
+              String(m?.raw_fields?.['DATE OF FILING OF CP APPLICATION'] || '').trim() ||
+              String(m?.raw_fields?.['Type of Project'] || '').trim() ||
+              String(m?.raw_fields?.LOCATION || '').trim()
+            );
+
+            const looksLikePendingWorkbookRow = Boolean(
+              worksheetNo &&
+              validPendingRegion &&
+              (hasWorkbookStatusFields || hasWorkbookCoreFields)
+            );
+
+            if (!isPendingMapping(m) && !looksLikePendingWorkbookRow) return false;
+            if (isProjectLikeRecord(m)) return true;
+            return worksheetNo !== '';
+          })
         : isSelectedCollectionPending 
         ? mappings.filter((m) => isProjectLikeRecord(m))
         : mappings.filter((m) => isPendingMapping(m) && isProjectLikeRecord(m)))
@@ -2242,7 +2341,6 @@ function Dashboard({
 
   const pendingSummaryRows = computeSummaryRows(filteredPendingRecords || []);
   const pendingYearSummaryRows = computeYearSummaryRows(filteredPendingRecords || []);
-  const allYearSummaryRows = React.useMemo(() => computeYearSummaryRows(mappings || []), [mappings]);
   const { categories: pendingProjectCategories, countsByRegion: pendingProjectCountsByRegion, totals: pendingProjectCounts } = computePendingProjectTypeSummaryRows(filteredPendingRecords || []);
   const pendingSummaryTotals = React.useMemo(() => {
     const totals = {
@@ -2545,6 +2643,7 @@ function Dashboard({
       setIsImporting(true);
       setImportProgress(5);
       const fileName = String(file.name || '').toLowerCase();
+      setImportSourceFileName(String(file.name || ''));
       const isCsv = fileName.endsWith('.csv') || String(file.type || '').toLowerCase() === 'text/csv';
       let wb;
       if (isCsv) {
@@ -2778,6 +2877,50 @@ function Dashboard({
         setImportProgress(progress);
       });
 
+      // Keep summary sheets in raw import payload so cp_projects importer can
+      // read pending caps from the Summary sheet, while still skipping these
+      // sheets for direct row parsing into preview/import docs.
+      const summarySheetNames = wb.SheetNames.filter((sheetName) => String(sheetName || '').toLowerCase().includes('summary'));
+      summarySheetNames.forEach((sheetName) => {
+        const ws = wb.Sheets[sheetName];
+        if (!ws) return;
+        const wsRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+        if (!Array.isArray(wsRows) || wsRows.length === 0) return;
+
+        const maxScan = Math.min(wsRows.length, 80);
+        let headerRowIndex = 0;
+        let bestNonEmpty = -1;
+        for (let i = 0; i < maxScan; i += 1) {
+          const row = wsRows[i] || [];
+          const nonEmpty = row.filter((cell) => String(cell || '').trim() !== '').length;
+          if (nonEmpty > bestNonEmpty) {
+            bestNonEmpty = nonEmpty;
+            headerRowIndex = i;
+          }
+        }
+
+        const headerRowOriginal = (wsRows[headerRowIndex] || []).map((h, idx) => {
+          const label = String(h || '').trim();
+          return label || `__col_${idx}`;
+        });
+
+        const rawRecords = [];
+        for (let r = headerRowIndex + 1; r < wsRows.length; r += 1) {
+          const row = wsRows[r] || [];
+          const rawObj = {};
+          for (let i = 0; i < headerRowOriginal.length; i += 1) {
+            const key = headerRowOriginal[i];
+            const value = row[i];
+            rawObj[key] = value !== undefined && value !== null ? value : '';
+          }
+          rawRecords.push(rawObj);
+        }
+
+        if (rawRecords.length > 0 && !rawSheets.some((s) => s.sheetName === sheetName)) {
+          rawSheets.push({ sheetName, rawRecords, headers: headerRowOriginal });
+        }
+      });
+
       parsedRecordsCount = allRecords.length;
       if (parsedRecordsCount === 0) {
         const sheetNote = invalidSheets.length > 0 ? ` Sheets without headers: ${invalidSheets.join(', ')}.` : '';
@@ -2834,20 +2977,29 @@ function Dashboard({
       // Start actual import phase
       setIsImporting(true);
       setImportProgress(1);
+      const sourceName = String(importSourceFileName || '').toLowerCase();
+      let effectiveActiveTab = activeTab;
+      if (sourceName.includes('pending')) {
+        effectiveActiveTab = 'pending';
+      } else if (sourceName.includes('approved')) {
+        effectiveActiveTab = 'mappings';
+      } else if (sourceName.includes('ongoing')) {
+        effectiveActiveTab = 'ongoing';
+      }
       // If user is the NCIP inventory user and is currently on the Ongoing tab,
       // force the import into a dedicated ongoing collection so Approved and
       // Ongoing are stored separately in Firestore.
-      let options = { mode, onProgress: (p) => setImportProgress(p), targetTab: activeTab, rawImport: importRawSheets, targetCollection: 'cp_projects' };
+      let options = { mode, onProgress: (p) => setImportProgress(p), targetTab: effectiveActiveTab, rawImport: importRawSheets, targetCollection: 'cp_projects' };
       try {
         // For unified cp_projects table, just pass activeTab for status assignment.
         // No need to force separate collections - status field handles tab routing.
-        if (activeTab === 'ongoing') {
+        if (effectiveActiveTab === 'ongoing') {
           options.forceOngoing = true;
         }
       } catch (e) {
         // ignore
       }
-      await onImportMappings(prepared, { ...options, activeTab }); // Pass current tab for status assignment
+      await onImportMappings(prepared, { ...options, activeTab: effectiveActiveTab }); // Pass effective tab for status assignment
       // If we imported into a dedicated ongoing collection, switch UI to show it
       try {
         const col = options && options.collectionName;
@@ -3750,7 +3902,7 @@ function Dashboard({
                             ))}
                             {/* TOTAL row */}
                             {(() => {
-                              const dataRows = pendingYearSummaryRows.filter(r => r.year !== 'Unknown');
+                              const dataRows = pendingYearSummaryRows;
                               const cols = ['CAR','I','II','III','IVA','IVB','V','VI/VII','IX','X','XI','XII','XIII','TOTAL'];
                               const totals = {};
                               cols.forEach(c => { totals[c] = dataRows.reduce((s, r) => s + (Number(r[c]) || 0), 0); });
@@ -3806,70 +3958,7 @@ function Dashboard({
                     </table>
                   </div>
                 )}
-                {currentPendingTab.id === 'all-years-summary' && (
-                  <div className="overflow-x-auto">
-                    <div className="mb-3 flex items-center gap-2">
-                      <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-teal-50 border border-teal-200 text-teal-700 text-xs font-semibold">All Statuses Combined</span>
-                      <span className="text-xs text-[#0A2D55]/50">Counts every Pending, Approved, and Ongoing record by year and region.</span>
-                    </div>
-                    <table className="min-w-[1100px] w-full table-auto">
-                      <thead className="bg-teal-50 border-b border-teal-200">
-                        <tr>
-                          {[
-                            'YEAR APPLIED', 'CAR', 'I', 'II', 'III', 'IVA', 'IVB', 'V', 'VI/VII', 'IX', 'X', 'XI', 'XII', 'XIII', 'TOTAL'
-                          ].map((h, i) => (
-                            <th key={i} title={h} className="px-3 sm:px-4 py-2 text-left text-[11px] sm:text-[12px] font-semibold text-teal-800 normal-case leading-snug whitespace-nowrap truncate max-w-[220px]">{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {allYearSummaryRows.length === 0 ? (
-                          <tr>
-                            <td colSpan={15} className="px-4 sm:px-6 py-6 text-center text-[#0A2D55]/60">No records found.</td>
-                          </tr>
-                        ) : (
-                          <>
-                            {allYearSummaryRows.filter(r => r.year !== 'Unknown').map((r, idx) => (
-                              <tr key={r.year || idx} className="border-b border-[#0A2D55]/10">
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.year}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal font-semibold">{r.CAR || 0}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.I || 0}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.II || 0}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.III || 0}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.IVA || 0}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.IVB || 0}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.V || 0}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r['VI/VII'] || 0}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.IX || 0}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.X || 0}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.XI || 0}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.XII || 0}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.XIII || 0}</td>
-                                <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{r.TOTAL || 0}</td>
-                              </tr>
-                            ))}
-                            {/* TOTAL row */}
-                            {(() => {
-                              const dataRows = allYearSummaryRows.filter(r => r.year !== 'Unknown');
-                              const cols = ['CAR','I','II','III','IVA','IVB','V','VI/VII','IX','X','XI','XII','XIII','TOTAL'];
-                              const totals = {};
-                              cols.forEach(c => { totals[c] = dataRows.reduce((s, r) => s + (Number(r[c]) || 0), 0); });
-                              return (
-                                <tr className="border-t-2 border-teal-300 bg-teal-50 font-bold">
-                                  <td className="px-3 sm:px-4 py-2 text-[12px] text-teal-800 whitespace-normal">TOTAL</td>
-                                  {cols.map(c => (
-                                    <td key={c} className="px-3 sm:px-4 py-2 text-[12px] text-teal-800 whitespace-normal">{totals[c]}</td>
-                                  ))}
-                                </tr>
-                              );
-                            })()}
-                          </>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-                {currentPendingTab.id !== 'summary' && currentPendingTab.id !== 'summary-per-project' && currentPendingTab.id !== 'all-years-summary' && (
+                {currentPendingTab.id !== 'summary' && currentPendingTab.id !== 'summary-per-project' && (
                   (() => {
                     const regionTableTabs = ['car', 'region1', 'region2', 'region3', 'region4a', 'region4b', 'region5', 'region6-7', 'region9', 'region10', 'region11', 'region12', 'region13', 'road-projects'];
                     if (regionTableTabs.includes(String(currentPendingTab.id || '').toLowerCase())) {

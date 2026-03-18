@@ -484,8 +484,11 @@ export function App() {
                 ? origHeaders
                 : Object.keys(rawRecords[0]);
               const rows = rawRecords.map((r) => {
-                const keys = Object.keys(r);
-                return headers.map((_, i) => r[keys[i]] || '');
+                return headers.map((h) => {
+                  const key = String(h ?? '');
+                  const val = Object.prototype.hasOwnProperty.call(r, key) ? r[key] : '';
+                  return val ?? '';
+                });
               });
               return { sheetName, headers, rows };
             })

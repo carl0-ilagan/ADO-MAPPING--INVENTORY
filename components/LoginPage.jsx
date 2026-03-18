@@ -137,7 +137,7 @@ export function LoginPage({ onLogin }) {
                 </div>
               </div>
             )}
-
+  
             {/* Panel header */}
             <div className="p-6 sm:p-7 border-b border-white/15 relative">
               <div className="absolute inset-0 bg-gradient-to-r from-[#F2C94C]/10 via-transparent to-[#F2C94C]/10" aria-hidden />
@@ -164,8 +164,8 @@ export function LoginPage({ onLogin }) {
                   <label htmlFor="username" className="block text-xs sm:text-sm font-semibold text-white/90 mb-2">
                     Username or Email
                   </label>
-                  <input
-                    id="username"
+                  <input  
+                    id="username" 
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
