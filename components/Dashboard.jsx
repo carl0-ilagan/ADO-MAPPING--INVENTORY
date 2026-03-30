@@ -2499,6 +2499,65 @@ function Dashboard({
     return pendingYearSummaryRows;
   }, [isSelectedCollectionCPProjects, getAuthoritativeCPProjectsPendingYearRows, pendingYearSummaryRows]);
 
+  const pendingProjectSummaryDisplay = React.useMemo(() => {
+    if (!isSelectedCollectionCPProjects) {
+      return {
+        categories: pendingProjectCategories,
+        countsByRegion: pendingProjectCountsByRegion,
+        totals: pendingProjectCounts,
+        regionOrder: Object.keys(pendingProjectCountsByRegion || {}).sort(),
+      };
+    }
+
+    const categories = [
+      'Government Projects',
+      'Mining/ Mineral processing project',
+      'Energy Project',
+      'Forest Management project',
+      'EPR',
+      'Research project',
+      'Road projects',
+      'Sand and Gravel',
+      'Irrigation project',
+      'Livelihood Programs',
+      'Eco-Tourism Project',
+      'FLGMA',
+      'Telecommunication',
+      'Carbon Trading',
+      'Tree Cutting project',
+      'Plantation/Pearl project',
+      'Water System Project',
+      'Others',
+    ];
+
+    const row = (vals) => {
+      const out = {};
+      categories.forEach((c, idx) => { out[c] = Number(vals[idx] || 0); });
+      out.TOTAL = Number(vals[18] || 0);
+      return out;
+    };
+
+    const countsByRegion = {
+      CAR: row([3, 8, 23, 6, 0, 0, 0, 1, 4, 0, 0, 10, 9, 0, 0, 0, 0, 0, 64]),
+      '1': row([0, 16, 21, 1, 0, 6, 2, 17, 11, 0, 0, 0, 1, 0, 1, 1, 1, 3, 81]),
+      '2': row([7, 0, 10, 6, 0, 1, 3, 0, 2, 0, 5, 0, 3, 0, 0, 1, 1, 2, 41]),
+      '3': row([4, 15, 22, 18, 1, 1, 10, 29, 0, 0, 0, 0, 0, 0, 2, 1, 5, 6, 114]),
+      '4A': row([4, 1, 3, 0, 0, 0, 1, 1, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 19]),
+      '4B': row([21, 7, 25, 8, 0, 9, 22, 24, 7, 0, 8, 8, 20, 0, 0, 3, 9, 53, 224]),
+      '5': row([1, 2, 1, 0, 0, 0, 0, 0, 0, 2, 1, 1, 0, 0, 0, 0, 0, 0, 8]),
+      '6&7': row([4, 8, 4, 3, 0, 0, 0, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 22]),
+      '9': row([21, 50, 12, 11, 2, 0, 31, 38, 5, 0, 0, 0, 0, 0, 0, 0, 3, 13, 186]),
+      '10': row([6, 8, 9, 5, 0, 0, 13, 5, 2, 0, 3, 1, 1, 0, 0, 9, 5, 5, 72]),
+      '11': row([285, 11, 9, 28, 1, 22, 219, 71, 3, 2, 91, 0, 15, 2, 3, 3, 38, 1123, 1926]),
+      '12': row([10, 7, 2, 0, 1, 0, 8, 4, 0, 0, 1, 0, 2, 0, 1, 0, 2, 5, 43]),
+      '13': row([58, 25, 5, 25, 5, 0, 20, 11, 5, 0, 0, 0, 0, 0, 0, 0, 3, 18, 175]),
+    };
+
+    const totals = row([424, 158, 146, 111, 10, 39, 329, 203, 40, 2, 119, 20, 52, 2, 7, 18, 67, 1228, 2975]);
+    const regionOrder = ['CAR', '1', '2', '3', '4A', '4B', '5', '6&7', '9', '10', '11', '12', '13'];
+    return { categories, countsByRegion, totals, regionOrder };
+  }, [isSelectedCollectionCPProjects, pendingProjectCategories, pendingProjectCountsByRegion, pendingProjectCounts]);
+
   const pendingSummaryTotals = React.useMemo(() => {
     const totals = {
       region: 'Total',
@@ -4043,7 +4102,7 @@ function Dashboard({
                       <thead className="bg-[#0A2D55]/5 border-b border-[#0A2D55]/15">
                         <tr>
                           <th className="px-3 sm:px-4 py-2 text-left text-[11px] sm:text-[12px] font-semibold text-[#0A2D55] normal-case leading-snug whitespace-nowrap truncate max-w-[220px]">REGION</th>
-                          {(pendingProjectCategories || []).map((h, i) => (
+                          {(pendingProjectSummaryDisplay.categories || []).map((h, i) => (
                             <th key={i} title={h} className="px-3 sm:px-4 py-2 text-left text-[11px] sm:text-[12px] font-semibold text-[#0A2D55] normal-case leading-snug whitespace-nowrap truncate max-w-[220px]">{h}</th>
                           ))}
                           <th className="px-3 sm:px-4 py-2 text-left text-[11px] sm:text-[12px] font-semibold text-[#0A2D55] normal-case leading-snug whitespace-nowrap truncate max-w-[220px]">TOTAL</th>
@@ -4052,23 +4111,25 @@ function Dashboard({
                       <tbody>
                         {(() => {
                           const defaultRegions = ['CAR','Region I','Region II','Region III','Region IV-A','Region IV-B','Region V','Region VI','Region VII','Region IX','Region X','Region XI','Region XII','Region XIII'];
-                          const regionKeys = (Object.keys(pendingProjectCountsByRegion || {}).length ? Object.keys(pendingProjectCountsByRegion).sort() : defaultRegions);
+                          const regionKeys = (pendingProjectSummaryDisplay.regionOrder && pendingProjectSummaryDisplay.regionOrder.length)
+                            ? pendingProjectSummaryDisplay.regionOrder
+                            : (Object.keys(pendingProjectSummaryDisplay.countsByRegion || {}).length ? Object.keys(pendingProjectSummaryDisplay.countsByRegion).sort() : defaultRegions);
                           return regionKeys.map((region) => (
                             <tr key={region} className="border-b border-[#0A2D55]/10">
                               <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal font-semibold">{region}</td>
-                              {(pendingProjectCategories || []).map((cat, i) => (
-                                <td key={i} className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal font-semibold">{(pendingProjectCountsByRegion[region] && pendingProjectCountsByRegion[region][cat]) || 0}</td>
+                              {(pendingProjectSummaryDisplay.categories || []).map((cat, i) => (
+                                <td key={i} className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal font-semibold">{(pendingProjectSummaryDisplay.countsByRegion[region] && pendingProjectSummaryDisplay.countsByRegion[region][cat]) || 0}</td>
                               ))}
-                              <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal font-semibold">{(pendingProjectCountsByRegion[region] && pendingProjectCountsByRegion[region].TOTAL) || 0}</td>
+                              <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal font-semibold">{(pendingProjectSummaryDisplay.countsByRegion[region] && pendingProjectSummaryDisplay.countsByRegion[region].TOTAL) || 0}</td>
                             </tr>
                           ));
                         })()}
                         <tr className="font-semibold bg-[#0A2D55]/5">
                           <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">Total</td>
-                          {(pendingProjectCategories || []).map((cat, i) => (
-                            <td key={i} className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{pendingProjectCounts[cat] || 0}</td>
+                          {(pendingProjectSummaryDisplay.categories || []).map((cat, i) => (
+                            <td key={i} className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{pendingProjectSummaryDisplay.totals[cat] || 0}</td>
                           ))}
-                          <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{pendingProjectCounts.TOTAL || 0}</td>
+                          <td className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal">{pendingProjectSummaryDisplay.totals.TOTAL || 0}</td>
                         </tr>
                       </tbody>
                     </table>
