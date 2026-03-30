@@ -1528,9 +1528,12 @@ function Dashboard({
       return prefiltered.filter((rec) => {
         const candidate = deriveRawRegion(rec) || rec.region || '';
         const d = detectRegionSheet(candidate);
-        if (d === 'CAR') return true;
-        const v = String(candidate || '').toUpperCase();
-        return v.includes('CORDILLERA') || v.includes('CAR');
+        const bucket =
+          toPendingRegionBucket(d) ||
+          toPendingRegionBucket(canonicalRegion(candidate)) ||
+          toPendingRegionBucket(candidate) ||
+          toPendingRegionBucket(rec?.province || rec?.raw_fields?.PROVINCE || rec?.raw_fields?.Province || '');
+        return bucket === 'CAR';
       });
     }
 
@@ -1539,7 +1542,12 @@ function Dashboard({
       return prefiltered.filter((rec) => {
         const candidate = deriveRawRegion(rec) || rec.region || '';
         const d = detectRegionSheet(candidate);
-        return d === 'Region VI' || d === 'Region VII';
+        const bucket =
+          toPendingRegionBucket(d) ||
+          toPendingRegionBucket(canonicalRegion(candidate)) ||
+          toPendingRegionBucket(candidate) ||
+          toPendingRegionBucket(rec?.province || rec?.raw_fields?.PROVINCE || rec?.raw_fields?.Province || '');
+        return bucket === 'VI/VII';
       });
     }
 
@@ -2310,7 +2318,17 @@ function Dashboard({
     ? (isSelectedCollectionCPProjects
         ? (() => {
             const filtered = mappings.filter((m) => {
-            const worksheetNo = String(m?.worksheet_no || m?.worksheetNo || '').trim();
+            const worksheetNo = String(
+              m?.worksheet_no ||
+              m?.worksheetNo ||
+              m?.no ||
+              m?.raw_fields?.NO ||
+              m?.raw_fields?.No ||
+              m?.raw_fields?.no ||
+              ''
+            ).trim();
+            const isPendingWorkbookNo = /^(\d+|[-—])$/.test(worksheetNo);
+            const hasLegacyControlNo = /[A-Za-z]/.test(worksheetNo);
             const rawRegion = deriveRawRegion(m) || m?.region || m?.province || m?.raw_fields?.PROVINCE || m?.raw_fields?.Province || m?.raw_fields?.province || '';
             const detectedRegion = String(
               detectRegionSheet(rawRegion) ||
@@ -2350,13 +2368,13 @@ function Dashboard({
             const hasMasterPendingStatus = String(m?.status || '').toLowerCase().includes('pend');
 
             const looksLikePendingWorkbookRow = Boolean(
-              worksheetNo &&
+              !hasLegacyControlNo &&
               validPendingRegion &&
               (hasWorkbookStatusFields || hasWorkbookCoreFields || hasMasterPendingStatus)
             );
 
             const isPending = isPendingMapping(m) || looksLikePendingWorkbookRow;
-            const hasValidWorksheet = worksheetNo && validPendingRegion;
+            const hasValidWorksheet = isPendingWorkbookNo && validPendingRegion;
             const isProject = isProjectLikeRecord(m);
             const hasResolvableRegion = Boolean(
               toPendingRegionBucket(rawRegion) ||
@@ -2364,6 +2382,7 @@ function Dashboard({
             );
 
             if (!isPending) return false;
+            if (hasLegacyControlNo) return false;
             return isProject || hasValidWorksheet || hasResolvableRegion;
           });
             return filtered;
@@ -2371,8 +2390,18 @@ function Dashboard({
         : isSelectedCollectionPending 
         ? (() => {
             const filtered = mappings.filter((m) => {
-            const worksheetNo = String(m?.worksheet_no || m?.worksheetNo || '').trim();
-            if (!worksheetNo) return false;
+            const worksheetNo = String(
+              m?.worksheet_no ||
+              m?.worksheetNo ||
+              m?.no ||
+              m?.raw_fields?.NO ||
+              m?.raw_fields?.No ||
+              m?.raw_fields?.no ||
+              ''
+            ).trim();
+            const isPendingWorkbookNo = /^(\d+|[-—])$/.test(worksheetNo);
+            const hasLegacyControlNo = /[A-Za-z]/.test(worksheetNo);
+            if (hasLegacyControlNo) return false;
 
             const rawRegion = deriveRawRegion(m) || m?.region || m?.province || m?.raw_fields?.PROVINCE || m?.raw_fields?.Province || m?.raw_fields?.province || '';
             const detectedRegion = String(
@@ -2389,7 +2418,7 @@ function Dashboard({
               'IX', 'X', 'XI', 'XII', 'XIII', '1', '2', '3', '4A', '4B', '5', '6', '7', '6&7', '9', '10', '11', '12', '13'
             ].includes(detectedRegion) || Boolean(toPendingRegionBucket(detectedRegion) || toPendingRegionBucket(rawRegion));
 
-            return validPendingRegion || isProjectLikeRecord(m);
+            return (isPendingWorkbookNo && validPendingRegion) || (validPendingRegion && isProjectLikeRecord(m));
           });
             return filtered;
           })()
@@ -2469,24 +2498,80 @@ function Dashboard({
     };
     if (Object.prototype.hasOwnProperty.call(regionMap, id)) {
       const target = regionMap[id]; // e.g. 'Region XI'
+      const targetBucketByRegion = {
+        'Region I': 'I',
+        'Region II': 'II',
+        'Region III': 'III',
+        'Region IV-A': 'IVA',
+        'Region IV-B': 'IVB',
+        'Region V': 'V',
+        'Region IX': 'IX',
+        'Region X': 'X',
+        'Region XI': 'XI',
+        'Region XII': 'XII',
+        'Region XIII': 'XIII',
+      };
+      const targetBucket = targetBucketByRegion[target] || '';
       return prefiltered.filter((rec) => {
         const candidate = deriveRawRegion(rec) || rec.region || '';
         const detected = detectRegionSheet(candidate);
-        if (detected === target) return true;
-        const canon = canonicalRegion(candidate) || '';
-        if (canon === target) return true;
-        // Exact string match only — avoid 'Region I'.includes('Region XI') false positives
-        return String(candidate || '').trim().toLowerCase() === target.toLowerCase();
+        const bucket =
+          toPendingRegionBucket(detected) ||
+          toPendingRegionBucket(canonicalRegion(candidate)) ||
+          toPendingRegionBucket(candidate) ||
+          toPendingRegionBucket(rec?.province || rec?.raw_fields?.PROVINCE || rec?.raw_fields?.Province || '');
+        if (targetBucket && bucket === targetBucket) return true;
+        return false;
       });
     }
 
     return prefiltered;
   }, [pendingRecordsAll, pendingSubTab, searchQuery, regionFilter, remarksFilter]);
 
-  const pendingTotalPages = Math.max(1, Math.ceil(((filteredPendingRecords && filteredPendingRecords.length) || 0) / itemsPerPage));
+  const getPendingWorksheetNo = (m) => String(
+    m?.worksheet_no ||
+    m?.worksheetNo ||
+    m?.no ||
+    m?.raw_fields?.NO ||
+    m?.raw_fields?.No ||
+    m?.raw_fields?.no ||
+    ''
+  ).trim();
+
+  const pendingSortedRecords = React.useMemo(() => {
+    if (!Array.isArray(filteredPendingRecords)) return [];
+    const list = [...filteredPendingRecords];
+    const dashRank = (v) => (v === '-' || v === '—' ? 1 : 0);
+
+    list.sort((a, b) => {
+      const aNo = getPendingWorksheetNo(a);
+      const bNo = getPendingWorksheetNo(b);
+
+      const aNum = /^\d+$/.test(aNo) ? Number(aNo) : null;
+      const bNum = /^\d+$/.test(bNo) ? Number(bNo) : null;
+
+      if (aNum !== null && bNum !== null && aNum !== bNum) return aNum - bNum;
+      if (aNum !== null && bNum === null) return -1;
+      if (aNum === null && bNum !== null) return 1;
+
+      const aDash = dashRank(aNo);
+      const bDash = dashRank(bNo);
+      if (aDash !== bDash) return aDash - bDash;
+
+      if (aNo !== bNo) return aNo.localeCompare(bNo, undefined, { numeric: true, sensitivity: 'base' });
+
+      const aProject = String(a?.nameOfProject || a?.name_of_project || a?.projectName || '').trim();
+      const bProject = String(b?.nameOfProject || b?.name_of_project || b?.projectName || '').trim();
+      return aProject.localeCompare(bProject, undefined, { numeric: true, sensitivity: 'base' });
+    });
+
+    return list;
+  }, [filteredPendingRecords]);
+
+  const pendingTotalPages = Math.max(1, Math.ceil(((pendingSortedRecords && pendingSortedRecords.length) || 0) / itemsPerPage));
   const pendingStart = (currentPage - 1) * itemsPerPage;
   const pendingEnd = pendingStart + itemsPerPage;
-  const paginatedPending = Array.isArray(filteredPendingRecords) ? filteredPendingRecords.slice(pendingStart, pendingEnd) : [];
+  const paginatedPending = Array.isArray(pendingSortedRecords) ? pendingSortedRecords.slice(pendingStart, pendingEnd) : [];
 
   const pendingSummaryRows = computeSummaryRows(filteredPendingRecords || []);
   const pendingYearSummaryRows = computeYearSummaryRows(filteredPendingRecords || []);
