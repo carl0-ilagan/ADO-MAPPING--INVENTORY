@@ -25,7 +25,7 @@ export function App() {
   const [editingMapping, setEditingMapping] = useState(null);
   const [toast, setToast] = useState(null);
   const [toastTick, setToastTick] = useState(0);
-  const [availableCollections, setAvailableCollections] = useState([{ id: 'mappings', collectionName: 'mappings' }]);
+  const [availableCollections, setAvailableCollections] = useState([{ id: 'cp_projects', collectionName: 'cp_projects', displayName: 'CP Projects (Unified)', type: 'cp_projects' }]);
   const [selectedCollection, setSelectedCollection] = useState('cp_projects');
 
   const buildDisplay = (m) => ({
@@ -54,6 +54,119 @@ export function App() {
       }
     })(),
   });
+
+  const normalizeCpProjectRecord = (p) => {
+    const raw = p && typeof p.raw_fields === 'object' && p.raw_fields ? p.raw_fields : {};
+    const rawNested = raw && typeof raw.raw_fields === 'object' && raw.raw_fields ? raw.raw_fields : {};
+    const pick = (...keys) => {
+      for (const key of keys) {
+        const candidates = [
+          p && p[key],
+          raw && raw[key],
+          raw && raw[String(key).toUpperCase()],
+          raw && raw[String(key).toLowerCase()],
+          rawNested && rawNested[key],
+          rawNested && rawNested[String(key).toUpperCase()],
+          rawNested && rawNested[String(key).toLowerCase()],
+        ];
+        for (const candidate of candidates) {
+          if (candidate === null || typeof candidate === 'undefined') continue;
+          if (Array.isArray(candidate) && candidate.length === 0) continue;
+          const value = String(candidate).trim();
+          if (value) return candidate;
+        }
+      }
+      return '';
+    };
+
+    const statusText = String(
+      pick('status', 'workflow_status', 'STATUS', 'Status', 'STATUS OF APPLICATION', 'Status of Application') ||
+      p?.status ||
+      ''
+    ).trim();
+    const explicitPending = Boolean(
+      p?._pending ||
+      raw?._pending ||
+      rawNested?._pending ||
+      String(pick('_pending') || '').toLowerCase() === 'true'
+    );
+    const normalizedStatus = explicitPending
+      ? 'Pending'
+      : /pend/i.test(statusText)
+        ? 'Pending'
+        : /approved/i.test(statusText)
+          ? 'Approved'
+          : /ongoing|on process|processing/i.test(statusText)
+            ? 'Ongoing'
+            : (statusText || 'Ongoing');
+    const affectedIcc = pick('affected_icc', 'ICC', 'ICCs', 'affected_iccs', 'AFFECTED AD/ICC/IP', 'Affected AD/ICC/IP (for CP with ongoing FPIC)');
+
+    return {
+      id: p.id,
+      surveyNumber: pick('control_number', 'survey_number', 'worksheet_no', 'NO', 'No', 'no') || '',
+      proponent: pick('proponent', 'applicantProponent', 'applicant', 'NAME OF PROPONENT', 'Name of Proponent', 'name_of_proponent') || '',
+      applicant: pick('proponent', 'applicantProponent', 'applicant', 'NAME OF PROPONENT', 'Name of Proponent', 'name_of_proponent') || '',
+      nameOfProject: pick('project_name', 'nameOfProject', 'projectName', 'NAME OF PROJECT', 'Name of Project', 'name_of_project') || '',
+      projectName: pick('project_name', 'nameOfProject', 'projectName', 'NAME OF PROJECT', 'Name of Project', 'name_of_project') || '',
+      typeOfProject: pick('type_of_project', 'natureOfProject', 'Type of Project', 'typeOfProject') || '',
+      natureOfProject: pick('type_of_project', 'natureOfProject', 'Type of Project', 'typeOfProject') || '',
+      location: pick('location', 'LOCATION', 'Project Location', 'province') || '',
+      projectCost: pick('project_cost', 'Project Cost') || '',
+      totalArea: pick('total_area', 'totalArea') || '',
+      area: pick('total_area', 'totalArea') || '',
+      ancestralDomain: pick('affected_ancestral_domain', 'Affected Ancestral Domain', 'AFFECTED AD/ICC/IP', 'AFFECTED AD/ICC/IP\t(for CP with ongoing FPIC)') || '',
+      dateOfApplication: pick('date_filed', 'dateOfFiling', 'DATE OF FILING OF CP APPLICATION', 'Date of Filing of CP Application') || '',
+      date_filed: pick('date_filed', 'dateOfFiling', 'DATE OF FILING OF CP APPLICATION', 'Date of Filing of CP Application') || '',
+      yearApplied: p.year_applied || null,
+      region: pick('region', 'REGION', 'Region') || '',
+      province: pick('province', 'PROVINCE', 'Province') || '',
+      municipality: pick('municipality', 'MUNICIPALITY', 'Municipality') || '',
+      municipalities: Array.isArray(p.municipalities) ? p.municipalities : (pick('municipality', 'MUNICIPALITY', 'Municipality') ? [String(pick('municipality', 'MUNICIPALITY', 'Municipality')).trim()] : []),
+      barangays: Array.isArray(p.barangays) ? p.barangays : (pick('barangay', 'BARANGAY', 'Barangay') ? [String(pick('barangay', 'BARANGAY', 'Barangay')).trim()] : []),
+      icc: Array.isArray(p.affected_icc) ? p.affected_icc : (affectedIcc ? String(affectedIcc).split(/[;,/]+/).map((v) => v.trim()).filter(Boolean) : []),
+      iccs: Array.isArray(p.affected_icc) ? p.affected_icc.join(', ') : (affectedIcc || ''),
+      reviewOfApplicationDocuments: pick('review_of_application_documents') || '',
+      needForFBI: pick('need_for_fbi') || '',
+      issuanceOfWorkOrder: pick('issuance_of_work_order') || '',
+      preFBIConference: pick('pre_fbi_conference') || '',
+      approvalOfWFP: pick('approval_of_wfp', 'approval_concurrence_of_wfp') || '',
+      paymentOfFBIFee: pick('payment_of_fbi_fee') || '',
+      conductOfFBI: pick('conduct_of_fbi') || '',
+      preparationOfFBIReport: pick('preparation_of_fbi_report') || '',
+      reviewOfFBIReport: pick('review_of_fbi_report') || '',
+      issuanceOfWorkOrderOfFPICTeam: pick('issuance_of_work_order_of_fpic_team') || '',
+      preFPICConference: pick('pre_fpic_conference') || '',
+      paymentOfFPICFee: pick('payment_of_fpic_fee') || '',
+      postingOfNotices: pick('posting_of_notices') || '',
+      firstCommunityAssembly: pick('first_community_assembly') || '',
+      secondCommunityAssembly: pick('second_community_assembly') || '',
+      consensusBuildingDecision: pick('consensus_building_decision') || '',
+      proceedToMOANegotiation: pick('proceed_to_moa_negotiation') || '',
+      issuanceResolutionToProceedToMOA: pick('issuance_resolution_to_proceed_to_moa') || '',
+      moaNegotiationPreparation: pick('moa_negotiation_preparation') || '',
+      moaValidationRatificationSigning: pick('moa_validation_ratification_signing') || '',
+      issuanceResolutionOfConsent: pick('issuance_resolution_of_consent') || '',
+      submissionOfFPICReport: pick('submission_of_fpic_report') || '',
+      reviewByRRT: pick('review_by_rrt') || '',
+      reviewByADOorLAO: pick('review_by_ado_or_lao') || '',
+      forComplianceOfFPICTeam: pick('for_compliance_of_fpic_team') || '',
+      cebDeliberation: pick('ceb_deliberation') || '',
+      cebApproved: pick('ceb_approved') || '',
+      preparationSigningCEBResolutionCP: pick('preparation_signing_ceb_resolution_cp') || '',
+      releaseOfCPToProponent: pick('release_of_cp_to_proponent') || '',
+      worksheetNo: pick('worksheet_no', 'NO', 'No', 'no') || '',
+      statusOfApplication: pick('status_of_application', 'STATUS OF APPLICATION', 'Status of Application') || '',
+      workflowStatus: statusText,
+      hasOngoingFpic: pick('has_ongoing_fpic') || '',
+      remarks: pick('remarks', 'REMARKS') || '',
+      status: normalizedStatus,
+      _ongoing: normalizedStatus === 'Ongoing',
+      _pending: normalizedStatus === 'Pending' || explicitPending,
+      importCollection: 'cp_projects',
+      raw_fields: rawNested && Object.keys(rawNested).length > 0 ? rawNested : (raw && Object.keys(raw).length > 0 ? raw : p),
+      _display: `${pick('proponent', 'applicantProponent', 'applicant', 'NAME OF PROPONENT', 'Name of Proponent') || 'N/A'} - ${pick('project_name', 'nameOfProject', 'projectName', 'NAME OF PROJECT', 'Name of Project') || 'N/A'}`
+    };
+  };
 
   // Monitor auth state changes
   useEffect(() => {
@@ -138,14 +251,15 @@ export function App() {
             remarks: p.remarks || '',
             status: p.status || 'Ongoing',
             _ongoing: (p.status || 'Ongoing') === 'Ongoing',
-            _pending: (p.status || 'Ongoing') === 'Pending',
+            _pending: (p.status || 'Ongoing') === 'Pending' || p._pending === true,
             importCollection: 'cp_projects',
             raw_fields: p,
             _display: `${p.proponent || 'N/A'} - ${p.project_name || 'N/A'}`
           }));
           
-          setMappings(mappingsFormat);
-          setMainMappings(mappingsFormat);
+          const normalizedMappingsFormat = mappingsFormat.map((m) => normalizeCpProjectRecord(m));
+          setMappings(normalizedMappingsFormat);
+          setMainMappings(normalizedMappingsFormat);
           
           // Also load user's old mappings for reference
           const userMappings = await getUserMappings(user.uid);
@@ -181,7 +295,6 @@ export function App() {
 
               const list = [
                 { id: 'cp_projects', collectionName: 'cp_projects', displayName: 'CP Projects (Unified)', type: 'cp_projects' },
-                { id: 'mappings', collectionName: 'mappings', displayName: 'mappings (legacy)' },
                 ...finalImports.map((i) => {
                   const base = i.displayName || (i.collectionName && i.collectionName.startsWith(prefix) ? i.collectionName.slice(prefix.length) : i.collectionName);
                   return ({
@@ -400,7 +513,14 @@ export function App() {
           return { ...updated, _display: buildDisplay(updated) };
         }));
       } else {
-        const mappingId = await addMapping({ ...newMapping });
+        const isPendingSubmission = Boolean(
+          (formData && formData._pending) ||
+          (addMappingContext && addMappingContext.pending) ||
+          String(selectedCollection || '').toLowerCase().includes('pending')
+        );
+        const mappingId = isPendingSubmission
+          ? await addMappingToCollection('cp_projects', { ...newMapping })
+          : await addMapping({ ...newMapping });
         // Update local state using functional update to avoid stale closures
         setMappings((prev) => [...prev, { id: mappingId, ...newMapping, _display: buildDisplay({ id: mappingId, ...newMapping }) }]);
       }
@@ -615,13 +735,14 @@ export function App() {
           remarks: p.remarks || '',
           status: p.status || 'Ongoing',
           _ongoing: (p.status || 'Ongoing') === 'Ongoing',
-          _pending: (p.status || 'Ongoing') === 'Pending',
+          _pending: (p.status || 'Ongoing') === 'Pending' || p._pending === true,
           importCollection: 'cp_projects',
           raw_fields: p,
           _display: `${p.proponent || 'N/A'} - ${p.project_name || 'N/A'}`
         }));
         
-        setMappings(mappingsFormat);
+        const normalizedMappingsFormat = mappingsFormat.map((m) => normalizeCpProjectRecord(m));
+        setMappings(normalizedMappingsFormat);
         // Reload fresh data from Firestore so the UI reflects the new import
         try {
           const freshProjects = await getAllCPProjects();
@@ -685,13 +806,14 @@ export function App() {
             remarks: p.remarks || '',
             status: p.status || 'Ongoing',
             _ongoing: (p.status || 'Ongoing') === 'Ongoing',
-            _pending: (p.status || 'Ongoing') === 'Pending',
+            _pending: (p.status || 'Ongoing') === 'Pending' || p._pending === true,
             importCollection: 'cp_projects',
             raw_fields: p,
             _display: `${p.proponent || 'N/A'} - ${p.project_name || 'N/A'}`
           }));
-          setMappings(mappingsFormat);
-          setMainMappings(mappingsFormat);
+          const normalizedMappingsFormat = mappingsFormat.map((m) => normalizeCpProjectRecord(m));
+          setMappings(normalizedMappingsFormat);
+          setMainMappings(normalizedMappingsFormat);
           setSelectedCollection('cp_projects');
         } catch (reloadErr) {
           console.warn('Failed to reload after import:', reloadErr);
@@ -725,7 +847,7 @@ export function App() {
         const safeTs = new Date().toISOString().replace(/[:.]/g, '-');
         collectionNameToWrite = `mappings_import_${currentUser.uid}_${safeTs}`;
       }
-      const result = await importMappings({ preparedDocs: records, rawRecords: options.rawImport || [], mode, collectionName: collectionNameToWrite || (mode === 'newCollection' ? null : 'mappings'), userId: currentUser.uid, idsToDelete, onProgress, forceOngoing });
+      const result = await importMappings({ preparedDocs: records, rawRecords: options.rawImport || [], mode, collectionName: 'cp_projects', userId: currentUser.uid, idsToDelete, onProgress, forceOngoing });
 
       // If importService returned a collectionName, try to refresh available imports
       try {
@@ -750,7 +872,7 @@ export function App() {
           })
         );
         const finalImports = checked.filter((c) => c.docsCount > 0).map((c) => c.importMeta);
-        const list = [{ id: 'mappings', collectionName: 'mappings', displayName: 'mappings' }, ...finalImports.map((i) => {
+        const list = [{ id: 'cp_projects', collectionName: 'cp_projects', displayName: 'CP Projects (Unified)', type: 'cp_projects' }, ...finalImports.map((i) => {
           const base = i.displayName || (i.collectionName && i.collectionName.startsWith(prefix) ? i.collectionName.slice(prefix.length) : i.collectionName);
           return { id: i.collectionName, collectionName: i.collectionName, displayName: (i.type && String(i.type).toLowerCase() === 'ongoing') ? `${base} (ongoing)` : base };
         })];
@@ -856,72 +978,7 @@ export function App() {
               console.log('App: loaded cp_projects count ->', Array.isArray(cpProjects) ? cpProjects.length : 0);
               
               // Convert CP Projects format to mappings format for Dashboard compatibility
-              const mappingsFormat = cpProjects.map(p => ({
-                id: p.id,
-                surveyNumber: p.control_number || p.survey_number || '',
-                proponent: p.proponent || '',
-                applicant: p.proponent || '',
-                nameOfProject: p.project_name || '',
-                projectName: p.project_name || '',
-                typeOfProject: p.type_of_project || '',
-                natureOfProject: p.type_of_project || '',
-                location: p.location || p.province || '',
-                projectCost: p.project_cost || '',
-                totalArea: p.total_area || '',
-                area: p.total_area || '',
-                ancestralDomain: p.affected_ancestral_domain || '',
-                dateOfApplication: p.date_filed || '',
-                date_filed: p.date_filed || '',
-                yearApplied: p.year_applied || null,
-                region: p.region || '',
-                province: p.province || '',
-                municipality: p.municipality || '',
-                municipalities: p.municipality ? [p.municipality] : [],
-                barangays: p.barangay ? [p.barangay] : [],
-                icc: p.affected_icc || [],
-                iccs: Array.isArray(p.affected_icc) ? p.affected_icc.join(', ') : (p.affected_icc || ''),
-                // FBI / FPIC workflow step fields
-                reviewOfApplicationDocuments: p.review_of_application_documents || '',
-                needForFBI: p.need_for_fbi || '',
-                issuanceOfWorkOrder: p.issuance_of_work_order || '',
-                preFBIConference: p.pre_fbi_conference || '',
-                approvalOfWFP: p.approval_of_wfp || p.approval_concurrence_of_wfp || '',
-                paymentOfFBIFee: p.payment_of_fbi_fee || '',
-                conductOfFBI: p.conduct_of_fbi || '',
-                preparationOfFBIReport: p.preparation_of_fbi_report || '',
-                reviewOfFBIReport: p.review_of_fbi_report || '',
-                issuanceOfWorkOrderOfFPICTeam: p.issuance_of_work_order_of_fpic_team || '',
-                preFPICConference: p.pre_fpic_conference || '',
-                paymentOfFPICFee: p.payment_of_fpic_fee || '',
-                postingOfNotices: p.posting_of_notices || '',
-                firstCommunityAssembly: p.first_community_assembly || '',
-                secondCommunityAssembly: p.second_community_assembly || '',
-                consensusBuildingDecision: p.consensus_building_decision || '',
-                proceedToMOANegotiation: p.proceed_to_moa_negotiation || '',
-                issuanceResolutionToProceedToMOA: p.issuance_resolution_to_proceed_to_moa || '',
-                moaNegotiationPreparation: p.moa_negotiation_preparation || '',
-                moaValidationRatificationSigning: p.moa_validation_ratification_signing || '',
-                issuanceResolutionOfConsent: p.issuance_resolution_of_consent || '',
-                submissionOfFPICReport: p.submission_of_fpic_report || '',
-                reviewByRRT: p.review_by_rrt || '',
-                reviewByADOorLAO: p.review_by_ado_or_lao || '',
-                forComplianceOfFPICTeam: p.for_compliance_of_fpic_team || '',
-                cebDeliberation: p.ceb_deliberation || '',
-                cebApproved: p.ceb_approved || '',
-                preparationSigningCEBResolutionCP: p.preparation_signing_ceb_resolution_cp || '',
-                releaseOfCPToProponent: p.release_of_cp_to_proponent || '',
-                worksheetNo: p.worksheet_no || '',
-                statusOfApplication: p.status_of_application || '',
-                workflowStatus: p.workflow_status || p.cadt_status || '',
-                hasOngoingFpic: p.has_ongoing_fpic || '',
-                remarks: p.remarks || '',
-                status: p.status || 'Ongoing',
-                _ongoing: (p.status || 'Ongoing') === 'Ongoing',
-                _pending: (p.status || 'Ongoing') === 'Pending',
-                importCollection: 'cp_projects',
-                raw_fields: p,
-                _display: `${p.proponent || 'N/A'} - ${p.project_name || 'N/A'}`
-              }));
+              const mappingsFormat = cpProjects.map(normalizeCpProjectRecord);
               
               setMappings(mappingsFormat);
               try { console.log('App: sample cp_project mapped ->', mappingsFormat.length ? JSON.parse(JSON.stringify(mappingsFormat[0])) : null); } catch (e) { /* ignore */ }

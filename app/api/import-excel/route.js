@@ -74,7 +74,7 @@ export async function POST(request) {
     const wb = XLSX.read(Buffer.from(buffer), { type: 'buffer' });
     const sheetNames = wb.SheetNames || [];
 
-    const targetCollection = String(collectionNameField).trim() || 'mappings_import_upload';
+    const targetCollection = 'cp_projects';
 
     let uploaded = 0;
     const errors = [];

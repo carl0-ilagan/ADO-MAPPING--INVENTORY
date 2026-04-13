@@ -132,14 +132,65 @@ function Dashboard({
   const isPendingMapping = (m) => {
     if (!m) return false;
     try {
+      // Fast path: explicit pending flag takes priority
+      if (m._pending === true) return true;
+
       const status = String(m.status || m.state || m.statusText || '').toLowerCase();
       if (status.includes('pend')) return true;
-      if (m._pending === true) return true;
+      if (status.includes('ongoing') || status.includes('approved') || status.includes('complete') || status.includes('done')) return false;
+
       if (String(m.pending || '').toLowerCase() === 'true') return true;
+
+      const rawStatus = String(
+        m.raw_fields?.status ||
+        m.raw_fields?.state ||
+        m.raw_fields?.statusText ||
+        m.raw_fields?.workflow_status ||
+        m.raw_fields?.workflowStatus ||
+        m.raw_fields?.['STATUS'] ||
+        m.raw_fields?.['Status'] ||
+        m.raw_fields?.['STATUS OF APPLICATION'] ||
+        m.raw_fields?.['Status of Application'] ||
+        m.raw_fields?.['REMARKS'] ||
+        m.raw_fields?.['Remarks'] ||
+        ''
+      ).toLowerCase();
+      if (rawStatus.includes('pend')) return true;
+      if (rawStatus.includes('ongoing') || rawStatus.includes('approved') || rawStatus.includes('complete') || rawStatus.includes('done')) return false;
+
+      const worksheetNo = String(
+        m.worksheet_no ||
+        m.worksheetNo ||
+        m.no ||
+        m.raw_fields?.NO ||
+        m.raw_fields?.No ||
+        m.raw_fields?.no ||
+        ''
+      ).trim();
+      const hasPendingWorksheetNo = /^\d+$/.test(worksheetNo) || /^[-—]$/.test(worksheetNo);
+
+      const regionSource = deriveRawRegion(m) || m.region || m.province || m.raw_fields?.PROVINCE || m.raw_fields?.Province || m.raw_fields?.province || '';
+      const regionBucket = toPendingRegionBucket(regionSource) || toPendingRegionBucket(canonicalRegion(regionSource));
+
+      const hasMeaningfulContent = Boolean(
+        m.proponent ||
+        m.nameOfProject ||
+        m.projectName ||
+        m.location ||
+        m.province ||
+        m.municipality ||
+        m.remarks ||
+        m.statusOfApplication ||
+        m.icc ||
+        m.iccs ||
+        (m.raw_fields && Object.values(m.raw_fields).some((v) => String(v || '').trim() && String(v || '').trim() !== '-' && String(v || '').trim() !== '—'))
+      );
+
+      // Accept rows with proper workbook structure, or rows with meaningful content (manual entries)
+      return (hasPendingWorksheetNo && regionBucket && hasMeaningfulContent) || hasMeaningfulContent;
     } catch (e) {
       return false;
     }
-    return false;
   };
 
   const detectRegionSheet = (regionValue) => {
@@ -357,6 +408,35 @@ function Dashboard({
     return n.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
   };
 
+  const getRemarksText = (mapping) => {
+    if (!mapping) return '';
+    const raw = mapping.raw_fields || {};
+    const values = [
+      mapping.remarks,
+      mapping.remark,
+      mapping.notes,
+      mapping.statusOfApplication,
+      mapping.status_of_application,
+      mapping.application_status,
+      mapping.workflowStatus,
+      mapping.workflow_status,
+      raw.remarks,
+      raw.remark,
+      raw.notes,
+      raw['STATUS OF APPLICATION'],
+      raw.status_of_application,
+      raw['ADO REMARKS STATUS'],
+      raw.ado_remarks_status,
+    ];
+    const picked = values.find((v) => {
+      const s = String(v || '').trim();
+      if (!s) return false;
+      const up = s.toUpperCase();
+      return !(up === '-' || up === '—' || up === 'N/A' || up === 'NA' || up === 'NONE' || up === 'NULL');
+    });
+    return String(picked || '').trim();
+  };
+
   const isInventoryUser = (user?.email || '').toLowerCase() === 'ncip@inventory.gov.ph';
   const NCIP_TABLE_HEADERS = [
     'No.',
@@ -464,20 +544,30 @@ function Dashboard({
       return null;
     };
 
-    if (h === 'no.' || h === 'no' || h === '#') return displayValue(getBest(['worksheetNo', 'worksheet_no', 'surveyNumber', 'survey_number', 'controlNumber', 'control_number']));
+    // For pending form entries, also try Excel header keys directly in raw_fields
+    const tryExcelHeaders = (excelHeaders) => {
+      if (!mapping || !mapping.raw_fields || typeof mapping.raw_fields !== 'object') return null;
+      for (const excelKey of excelHeaders) {
+        const val = mapping.raw_fields[excelKey];
+        if (val !== null && typeof val !== 'undefined' && String(val).trim() !== '') return String(val).trim();
+      }
+      return null;
+    };
+
+    if (h === 'no.' || h === 'no' || h === '#') return displayValue(getBest(['worksheetNo', 'worksheet_no', 'surveyNumber', 'survey_number', 'controlNumber', 'control_number']) || tryExcelHeaders(['NO', 'No', 'no']));
     if (h === 'region') {
-      const raw = getBest(['region', 'regionName', 'region_name']) || mapping.region;
+      const raw = getBest(['region', 'regionName', 'region_name']) || tryExcelHeaders(['REGION', 'Region']) || mapping.region;
       const canon = canonicalRegion(raw);
       return displayValue(canon || raw);
     }
     if (h === 'control number') return displayValue(getBest(['controlNumber', 'control_number', 'surveyNumber', 'survey_number']));
-    if (h.includes('applicant') || h.includes('proponent')) return displayValue(getBest(['proponent', 'applicantProponent', 'applicant_proponent', 'applicant', 'applicant_name', 'applicantName']));
-    if (h.includes('name of project') || (h.includes('name') && !h.includes('region') && !h.includes('proponent'))) return displayValue(getBest(['nameOfProject', 'name_of_project', 'projectName', 'project_name', 'name', 'title']));
-    if (h.includes('type of project') || h.includes('nature')) return displayValue(getBest(['typeOfProject', 'type_of_project', 'natureOfProject', 'nature_of_project', 'nature', 'projectNature', 'projectType']));
-    if (h.includes('project location') || h === 'location') return displayValue(getBest(['location', 'projectLocation', 'project_location', 'province', 'provinceName', 'province_name', 'location_full']));
+    if (h.includes('applicant') || h.includes('proponent')) return displayValue(getBest(['proponent', 'applicantProponent', 'applicant_proponent', 'applicant', 'applicant_name', 'applicantName']) || tryExcelHeaders(['NAME OF PROPONENT', 'Name of Proponent', 'PROPONENT']));
+    if (h.includes('name of project') || (h.includes('name') && !h.includes('region') && !h.includes('proponent'))) return displayValue(getBest(['nameOfProject', 'name_of_project', 'projectName', 'project_name', 'name', 'title']) || tryExcelHeaders(['NAME OF PROJECT', 'Name of Project', 'PROJECT']));
+    if (h.includes('type of project') || h.includes('nature')) return displayValue(getBest(['typeOfProject', 'type_of_project', 'natureOfProject', 'nature_of_project', 'nature', 'projectNature', 'projectType']) || tryExcelHeaders(['Type of Project', 'TYPE OF PROJECT', 'Type of project']));
+    if (h.includes('project location') || h === 'location') return displayValue(getBest(['location', 'projectLocation', 'project_location', 'province', 'provinceName', 'province_name', 'location_full']) || tryExcelHeaders(['LOCATION', 'Location', 'Project Location']));
     if (h.includes('ancestral domain')) return displayValue(getBest(['ancestralDomain', 'affected_ancestral_domain', 'affectedAncestralDomain', 'ancestral_domains']));
     if (h.includes('date of application') || h.includes('date of filing')) {
-      const raw = getBest(['dateOfApplication', 'date_of_application', 'date_filed', 'dateFiled', 'date_of_filing']);
+      const raw = getBest(['dateOfApplication', 'date_of_application', 'date_filed', 'dateFiled', 'date_of_filing']) || tryExcelHeaders(['DATE OF FILING OF CP APPLICATION', 'Date of Filing of CP Application', 'DATE OF APPLICATION', 'Date of Application']);
       if (!raw) return '-';
       // Handle Firestore timestamp serialized as JSON string: {"seconds":...,"nanoseconds":...}
       try {
@@ -495,8 +585,8 @@ function Dashboard({
       if (yearOnly) return displayValue(s.slice(0, 4));
       return displayValue(s);
     }
-    if (h.includes('project cost') || h === 'cost') return displayValue(getBest(['projectCost', 'project_cost', 'cost']));
-    if (h.includes('status of application') || h === 'status of application') return displayValue(getBest(['statusOfApplication', 'status_of_application', 'remarks', 'application_status']));
+    if (h.includes('project cost') || h === 'cost') return displayValue(getBest(['projectCost', 'project_cost', 'cost']) || tryExcelHeaders(['Project Cost', 'PROJECT COST', 'Cost']));
+    if (h.includes('status of application') || h === 'status of application') return displayValue(getBest(['statusOfApplication', 'status_of_application', 'remarks', 'application_status']) || tryExcelHeaders(['STATUS OF APPLICATION', 'Status of Application', 'Status']));
     if (h === 'status') return displayValue(getBest(['workflowStatus', 'workflow_status', 'cadtStatus', 'cadt_status', 'status']));
     if ((h.includes('ongoing fpic') || h.includes('for cp with')) && !h.includes('affected') && !h.includes('ad/icc') && h !== 'icc') {
       return displayValue(getBest(['hasOngoingFpic', 'has_ongoing_fpic', 'ongoingFpic', 'ongoing_fpic']));
@@ -1444,7 +1534,58 @@ function Dashboard({
         m.raw_fields.project
       )
     );
-    return Boolean(proponent || projectName);
+    const location = pick(
+      m.location,
+      m.province,
+      m.municipality,
+      m.municipalities,
+      m.barangays,
+      m.raw_fields && (
+        m.raw_fields.location ||
+        m.raw_fields.province ||
+        m.raw_fields.municipality ||
+        m.raw_fields['Project Location'] ||
+        m.raw_fields['LOCATION'] ||
+        m.raw_fields['PROVINCE']
+      )
+    );
+    const dateFiled = pick(
+      m.date_filed,
+      m.dateFiled,
+      m.dateOfApplication,
+      m.yearApplied,
+      m.raw_fields && (
+        m.raw_fields.date_filed ||
+        m.raw_fields.dateFiled ||
+        m.raw_fields['DATE OF FILING OF CP APPLICATION'] ||
+        m.raw_fields['DATE OF APPLICATION'] ||
+        m.raw_fields['DATE APPLIED']
+      )
+    );
+    const remarks = pick(
+      m.remarks,
+      m.statusOfApplication,
+      m.workflowStatus,
+      m.raw_fields && (
+        m.raw_fields.remarks ||
+        m.raw_fields['STATUS OF APPLICATION'] ||
+        m.raw_fields.status_of_application ||
+        m.raw_fields['ADO REMARKS STATUS']
+      )
+    );
+    const icc = pick(
+      m.icc,
+      m.iccs,
+      m.raw_fields && (
+        m.raw_fields.icc ||
+        m.raw_fields.iccs ||
+        m.raw_fields['AFFECTED AD/ICC/IP (for CP with ongoing FPIC)'] ||
+        m.raw_fields['Affected AD/ICC/IP (for CP with ongoing FPIC)'] ||
+        m.raw_fields['AFFECTED ICCs/IPs'] ||
+        m.raw_fields['Affected ICCs/IPs']
+      )
+    );
+    return Boolean(proponent || projectName || location || dateFiled || remarks || icc);
   };
 
   // Filter out summary/filler rows that are just region name repeats with no real data
@@ -1596,12 +1737,13 @@ function Dashboard({
     
     const prefiltered = ongoingRecords.filter((mapping) => {
       if (!mapping) return false;
+      const remarksText = getRemarksText(mapping);
       if (regionFilter !== 'all') {
         const canon = canonicalRegion(mapping.region || '');
         if (canon !== regionFilter) return false;
       }
-      if (remarksFilter === 'with' && String(mapping.remarks || '').trim() === '') return false;
-      if (remarksFilter === 'none' && String(mapping.remarks || '').trim() !== '') return false;
+      if (remarksFilter === 'with' && remarksText === '') return false;
+      if (remarksFilter === 'none' && remarksText !== '') return false;
       if (!query) return true;
       return (
         String(mapping.surveyNumber || '').toLowerCase().includes(query) ||
@@ -1611,7 +1753,7 @@ function Dashboard({
         (Array.isArray(mapping.municipalities) && mapping.municipalities.join(', ').toLowerCase().includes(query)) ||
         (Array.isArray(mapping.barangays) && mapping.barangays.join(', ').toLowerCase().includes(query)) ||
         (Array.isArray(mapping.icc) && mapping.icc.join(', ').toLowerCase().includes(query)) ||
-        String(mapping.remarks || '').toLowerCase().includes(query) ||
+        remarksText.toLowerCase().includes(query) ||
         String(mapping.proponent || mapping.applicant || mapping.applicantProponent || mapping.nameOfProject || mapping.projectName || '').toLowerCase().includes(query)
       );
     console.log('🔍 Ongoing Tab - After search filter:', prefiltered.length);
@@ -2219,8 +2361,9 @@ function Dashboard({
     } else {
       if (regionFilter !== 'all' && canonicalRegion(mapping.region) !== regionFilter) return false;
     }
-    if (remarksFilter === 'with' && String(mapping.remarks || '').trim() === '') return false;
-    if (remarksFilter === 'none' && String(mapping.remarks || '').trim() !== '') return false;
+    const remarksText = getRemarksText(mapping);
+    if (remarksFilter === 'with' && remarksText === '') return false;
+    if (remarksFilter === 'none' && remarksText !== '') return false;
     const safe = (v) => {
       if (v === null || typeof v === 'undefined') return '';
       if (Array.isArray(v)) return v.join(', ');
@@ -2235,7 +2378,7 @@ function Dashboard({
       safe(mapping.municipalities).toLowerCase().includes(query) ||
       safe(mapping.barangays).toLowerCase().includes(query) ||
       safe(mapping.icc).toLowerCase().includes(query) ||
-      safe(mapping.remarks).toLowerCase().includes(query) ||
+      safe(remarksText).toLowerCase().includes(query) ||
       safe(mapping.proponent || mapping.applicant || mapping.applicantProponent || mapping.nameOfProject || mapping.projectName).toLowerCase().includes(query)
     );
   });
@@ -2441,6 +2584,7 @@ function Dashboard({
             const hasLegacyControlNo = /[A-Za-z]/.test(worksheetNo);
             if (!isPendingMapping(m)) return false;
             if (hasLegacyControlNo) return false;
+            if (isSummaryFiller(m)) return false;
             return isProjectLikeRecord(m);
           });
             return filtered;
@@ -2476,11 +2620,12 @@ function Dashboard({
               'IX', 'X', 'XI', 'XII', 'XIII', '1', '2', '3', '4A', '4B', '5', '6', '7', '6&7', '9', '10', '11', '12', '13'
             ].includes(detectedRegion) || Boolean(toPendingRegionBucket(detectedRegion) || toPendingRegionBucket(rawRegion));
 
+            if (isSummaryFiller(m)) return false;
             return (isPendingWorkbookNo && validPendingRegion) || (validPendingRegion && isProjectLikeRecord(m));
           });
             return filtered;
           })()
-        : mappings.filter((m) => isPendingMapping(m) && isProjectLikeRecord(m)))
+        : mappings.filter((m) => isPendingMapping(m) && !isSummaryFiller(m) && isProjectLikeRecord(m)))
     : [];
 
   const filteredPendingRecords = React.useMemo(() => {
@@ -2499,12 +2644,13 @@ function Dashboard({
     const query = normalizeSearch(searchQuery);
     const prefiltered = pendingRecordsAll.filter((mapping) => {
       if (!mapping) return false;
+      const remarksText = getRemarksText(mapping);
       if (regionFilter !== 'all') {
         const canon = canonicalRegion(mapping.region || '');
         if (canon !== regionFilter) return false;
       }
-      if (remarksFilter === 'with' && String(mapping.remarks || '').trim() === '') return false;
-      if (remarksFilter === 'none' && String(mapping.remarks || '').trim() !== '') return false;
+      if (remarksFilter === 'with' && remarksText === '') return false;
+      if (remarksFilter === 'none' && remarksText !== '') return false;
       if (!query) return true;
       const rawFields = mapping?.raw_fields || {};
       const pendingProjectText = String(
@@ -2534,6 +2680,22 @@ function Dashboard({
         .map(([, v]) => (Array.isArray(v) ? v.join(', ') : String(v || '')))
         .join(' ');
 
+      const rawFieldValuesText = Object.values(rawFields)
+        .flatMap((v) => (Array.isArray(v) ? v : [v]))
+        .map((v) => String(v || '').trim())
+        .filter((v) => v && v !== '-' && v !== '—' && v.toLowerCase() !== 'n/a' && v.toLowerCase() !== 'na')
+        .join(' ');
+
+      const topLevelSearchText = Object.entries(mapping)
+        .filter(([k, v]) => k !== 'raw_fields' && k !== 'ongoing' && v !== null && typeof v !== 'undefined')
+        .map(([, v]) => {
+          if (Array.isArray(v)) return v.join(', ');
+          if (typeof v === 'object') return '';
+          return String(v || '');
+        })
+        .filter(Boolean)
+        .join(' ');
+
       const candidates = [
         mapping.surveyNumber,
         mapping.controlNumber,
@@ -2543,10 +2705,12 @@ function Dashboard({
         Array.isArray(mapping.municipalities) ? mapping.municipalities.join(', ') : '',
         Array.isArray(mapping.barangays) ? mapping.barangays.join(', ') : '',
         Array.isArray(mapping.icc) ? mapping.icc.join(', ') : '',
-        mapping.remarks,
+        remarksText,
         pendingProponentText,
         pendingProjectText,
         rawSearchText,
+        rawFieldValuesText,
+        topLevelSearchText,
       ];
 
       return candidates.some((value) => normalizeSearch(value).includes(query));
@@ -2679,7 +2843,87 @@ function Dashboard({
   const pendingYearSummaryRows = computeYearSummaryRows(filteredPendingRecords || []);
 
   const { categories: pendingProjectCategories, countsByRegion: pendingProjectCountsByRegion, totals: pendingProjectCounts } = computePendingProjectTypeSummaryRows(filteredPendingRecords || []);
-  const pendingYearSummaryRowsDisplay = React.useMemo(() => getAuthoritativePendingYearRows(), [getAuthoritativePendingYearRows]);
+  const pendingYearSummaryRowsDisplay = React.useMemo(() => {
+    const baseRows = (getAuthoritativePendingYearRows() || []).map((r) => ({ ...r }));
+    const byYear = new Map(baseRows.map((r) => [String(r.year), r]));
+
+    const ensureRow = (year) => {
+      const y = String(year || 'Unknown');
+      if (!byYear.has(y)) {
+        const row = {
+          year: y,
+          CAR: 0,
+          I: 0,
+          II: 0,
+          III: 0,
+          IVA: 0,
+          IVB: 0,
+          V: 0,
+          'VI/VII': 0,
+          IX: 0,
+          X: 0,
+          XI: 0,
+          XII: 0,
+          XIII: 0,
+          TOTAL: 0,
+        };
+        byYear.set(y, row);
+        baseRows.push(row);
+      }
+      return byYear.get(y);
+    };
+
+    (filteredPendingRecords || []).forEach((m) => {
+      // Imported workbook rows already accounted for by authoritative overrides.
+      // Add only manual rows so Summary increases when users add new pending entries.
+      const hasSourceSheet = Boolean(m?.source_sheet || m?.raw_fields?.source_sheet);
+      if (hasSourceSheet) return;
+
+      const year = getYearFromMapping(m) || 'Unknown';
+      if (String(year) === 'Unknown') return;
+
+      const row = ensureRow(year);
+      const candidate =
+        deriveRawRegion(m) ||
+        m?.region ||
+        m?.province ||
+        m?.raw_fields?.REGION ||
+        m?.raw_fields?.Region ||
+        m?.raw_fields?.region ||
+        m?.raw_fields?.PROVINCE ||
+        m?.raw_fields?.Province ||
+        m?.raw_fields?.province ||
+        '';
+
+      const bucket =
+        toPendingRegionBucket(detectRegionSheet(candidate)) ||
+        toPendingRegionBucket(canonicalRegion(candidate)) ||
+        toPendingRegionBucket(candidate);
+
+      if (bucket && Object.prototype.hasOwnProperty.call(row, bucket)) {
+        row[bucket] = Number(row[bucket] || 0) + 1;
+      }
+    });
+
+    baseRows.forEach((r) => {
+      r.TOTAL =
+        Number(r.CAR || 0) +
+        Number(r.I || 0) +
+        Number(r.II || 0) +
+        Number(r.III || 0) +
+        Number(r.IVA || 0) +
+        Number(r.IVB || 0) +
+        Number(r.V || 0) +
+        Number(r['VI/VII'] || 0) +
+        Number(r.IX || 0) +
+        Number(r.X || 0) +
+        Number(r.XI || 0) +
+        Number(r.XII || 0) +
+        Number(r.XIII || 0);
+    });
+
+    return baseRows.sort((a, b) => Number(a.year || 0) - Number(b.year || 0));
+  }, [getAuthoritativePendingYearRows, filteredPendingRecords]);
 
   const pendingProjectSummaryDisplay = React.useMemo(() => {
     return {
@@ -3364,6 +3608,10 @@ function Dashboard({
       } catch (e) {
         // ignore
       }
+      setSearchQuery('');
+      setRegionFilter('all');
+      setRemarksFilter('all');
+      setCurrentPage(1);
       const modeMsg = options.mode === 'add' ? 'added' : options.mode === 'replace' ? 'replaced' : (options.mode === 'newCollection' ? 'imported into new collection' : 'processed');
       setAlertTick((t) => t + 1);
       setAlert({ type: 'success', message: `Import successful. ${prepared.length} records ${modeMsg}.` });
@@ -3654,8 +3902,8 @@ function Dashboard({
                     )}
                   </div>
                 )}
-                <p className="text-sm mb-2">Do you want to <strong>add</strong> these records into the existing database or <strong>create a new set</strong>?</p>
-                <p className="text-xs text-white/70 mb-2">If your Excel file has a different format, choose Create new and review results first.</p>
+                <p className="text-sm mb-2">Click <strong>Import</strong> to add these records into the existing database.</p>
+                <p className="text-xs text-white/70 mb-2">This action appends imported rows and does not overwrite existing records.</p>
 
 
               </div>
@@ -3682,97 +3930,9 @@ function Dashboard({
                     onClick={() => handleConfirmImport('add')}
                     className="flex-1 px-4 py-2 rounded-lg bg-[#0A2D55] text-white hover:bg-[#0C3B6E] transition"
                   >
-                    Add to Existing
+                    Import
                   </button>
                 </div>
-
-                {activeTab === 'approved' && (
-                  <button
-                    type="button"
-                    onClick={() => handleConfirmImport('replace')}
-                    className="w-full px-4 py-2 rounded-lg bg-orange-600 text-white hover:bg-orange-700 transition font-semibold text-sm"
-                  >
-                    ⚠ Replace All Approved (Overwrite)
-                  </button>
-                )}
-
-                {activeTab === 'ongoing' && (
-                  <button
-                    type="button"
-                    onClick={() => handleConfirmImport('replace')}
-                    className="w-full px-4 py-2 rounded-lg bg-orange-600 text-white hover:bg-orange-700 transition font-semibold text-sm"
-                  >
-                    ⚠ Replace All Ongoing (Overwrite)
-                  </button>
-                )}
-
-                {activeTab === 'pending' && (
-                  <button
-                    type="button"
-                    onClick={() => handleConfirmImport('replace')}
-                    className="w-full px-4 py-2 rounded-lg bg-orange-600 text-white hover:bg-orange-700 transition font-semibold text-sm"
-                  >
-                    ⚠ Replace All Pending (Overwrite)
-                  </button>
-                )}
-
-                {(importPreparedDocs && importPreparedDocs.length) || importPreviewRecords.length > 0 && (
-                  <div className="flex gap-3 w-full mt-3">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        try {
-                          // Switch to Ongoing tab and provide a lightweight preview display
-                          // of the imported records as ongoing items without persisting them.
-                          setActiveTab('ongoing');
-                          if (typeof onPreviewImport === 'function') onPreviewImport(importPreparedDocs.length ? importPreparedDocs : importPreviewRecords);
-                          setShowImportChoiceModal(false);
-                        } catch (err) {
-                          console.warn('Preview as ongoing failed', err);
-                        }
-                      }}
-                      className="flex-1 px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition"
-                    >
-                      Preview as Ongoing
-                    </button>
-                  </div>
-                )}
-
-                {mappings.length > 0 ? (
-                  <div className="w-full">
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white/90 placeholder-white/50">
-                        <span className="truncate">
-                          {(() => {
-                            try {
-                              if (!importCollectionName) return 'New import';
-                              const suffix = importCollectionName.replace(/^mappings_import_/, '');
-                              const parts = suffix.split('_');
-                              const ts = parts.slice(1).join('_') || parts[0];
-                              return `Import ${ts.replace(/T/, ' ').replace(/-/g, ':')}`;
-                            } catch (e) {
-                              return 'New import';
-                            }
-                          })()}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleConfirmImport('newCollection', importCollectionName)}
-                          className="px-4 py-2 rounded-lg bg-red-500 text-white hover:bg-red-600 transition"
-                        >
-                          Create
-                        </button>
-                      </div>
-                    </div>
-                    <p className="text-xs text-white/70 mt-2">Collection names are autogenerated and hidden; the system keeps the full name internally.</p>
-                  </div>
-                ) : (
-                  <div className="w-full">
-                    <p className="text-sm text-white/80">No existing mappings found — only adding is available.</p>
-                  </div>
-                )}
               </div>
             </div>
           </div>
@@ -4300,7 +4460,16 @@ function Dashboard({
                                     ))}
                                     <td className="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm w-[120px] sticky right-0 z-10 bg-white shadow-[-6px_0_10px_rgba(7,26,44,0.06)]">
                                       <div className="flex items-center gap-1.5">
-                                        {isActionableRegion(mapping.region) ? (
+                                        {isActionableRegion(
+                                          deriveRawRegion(mapping) ||
+                                          mapping.region ||
+                                          mapping.raw_fields?.region ||
+                                          mapping.raw_fields?.sheet ||
+                                          mapping.province ||
+                                          mapping.raw_fields?.PROVINCE ||
+                                          mapping.raw_fields?.Province ||
+                                          ''
+                                        ) ? (
                                           <>
                                             <button type="button" onClick={() => handleViewMapping(mapping)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#0A2D55]/15 text-[#0A2D55] hover:bg-[#0A2D55]/5 transition" title="View" aria-label="View"><Eye size={15} /></button>
                                             <button type="button" onClick={() => onEditMapping(mapping)} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#F2C94C]/40 text-[#8B6F1C] hover:bg-[#F2C94C]/15 transition" title="Edit" aria-label="Edit"><Pencil size={15} /></button>

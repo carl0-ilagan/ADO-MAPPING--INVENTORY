@@ -368,7 +368,7 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
                 title="Update Email"
               >
                 <Edit2 size={16} className="text-[#0A2D55]" />
-              </button>
+              </button> 
             </div>
 
             {/* Role */}

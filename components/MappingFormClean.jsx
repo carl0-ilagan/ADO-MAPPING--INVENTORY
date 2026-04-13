@@ -745,7 +745,19 @@ export default function MappingForm({
           'STATUS': (pendingStatus || '').trim(),
         };
 
-        await onSubmit({ raw_fields: raw, location: (location || '').trim(), _pending: true });
+        await onSubmit({
+          raw_fields: raw,
+          // Canonical fields for cp_projects compatibility on refresh
+          region: (pendingRegionField || '').trim(),
+          applicantProponent: (pendingProponent || '').trim(),
+          nameOfProject: (pendingProjectNameField || '').trim(),
+          natureOfProject: (pendingTypeOfProject || '').trim(),
+          remarks: (pendingStatusOfApplication || '').trim(),
+          location: (location || '').trim(),
+          surveyNumber: (pendingNo || '').trim(),
+          status: 'Pending',
+          _pending: true
+        });
 
         if (!isModal) {
           setAlertTick((t) => t + 1);
