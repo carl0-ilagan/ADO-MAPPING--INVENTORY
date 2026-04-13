@@ -7,7 +7,7 @@ import { MappingForm } from '@/components/MappingFormClean';
 import { RightSplitModal } from '@/components/RightSplitModal';
 import { ProfilePage } from '@/components/ProfilePage';
 import { onAuthStateChangeListener, signOutUser } from '@/lib/firebaseAuth.js';
-import { getUserMappings, addMapping, deleteMapping, updateMapping, addMappingToCollection, getMappingsFromCollection, registerImportCollection, getUserImportCollections, updateDocumentInCollection, computeLocationFromMapping } from '@/lib/firebaseDB.js';
+import { getUserMappings, addMapping, deleteMapping, updateMapping, addMappingToCollection, getMappingsFromCollection, registerImportCollection, getUserImportCollections, updateDocumentInCollection, deleteDocumentsInCollection, computeLocationFromMapping } from '@/lib/firebaseDB.js';
 import { getAllCPProjects, deleteCPProjectsByIds } from '@/lib/cpProjectsService.js';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase.js';
@@ -428,15 +428,56 @@ export function App() {
 
   const handleDeleteAllByStatus = async (status) => {
     try {
-      // Get all records with the given status from current mappings state
-      const allProjects = await getAllCPProjects();
-      const targets = allProjects.filter((p) => (p.status || 'Ongoing') === status);
+      const normalize = (v) => String(v || '').trim().toLowerCase();
+      const desired = normalize(status);
+      const matchesStatus = (project) => {
+        const statusCandidates = [
+          project?.status,
+          project?.state,
+          project?.statusText,
+          project?.workflowStatus,
+          project?.workflow_status,
+        ].map(normalize).filter(Boolean);
+
+        if (desired === 'pending') {
+          if (project?._pending === true) return true;
+          if (String(project?.pending || '').toLowerCase() === 'true') return true;
+          return statusCandidates.some((s) => s.includes('pend'));
+        }
+        if (desired === 'ongoing') {
+          return statusCandidates.some((s) => s.includes('ongoing') || s.includes('on process') || s.includes('processing'));
+        }
+        if (desired === 'approved') {
+          return statusCandidates.some((s) => s.includes('approved'));
+        }
+        return statusCandidates.some((s) => s === desired);
+      };
+
+      const selectedCollectionName = String(selectedCollection || '').trim();
+      const useCurrentCollection = selectedCollectionName && selectedCollectionName !== 'cp_projects';
+      const sourceRecords = useCurrentCollection
+        ? await getMappingsFromCollection(selectedCollectionName)
+        : await getAllCPProjects();
+
+      const deleteAllInCurrentPendingCollection = useCurrentCollection && selectedCollectionName.toLowerCase().includes('pending') && desired === 'pending';
+      const targets = deleteAllInCurrentPendingCollection
+        ? sourceRecords
+        : sourceRecords.filter((p) => matchesStatus(p));
       const ids = targets.map((p) => p.id).filter(Boolean);
       if (ids.length === 0) return { deleted: 0 };
-      const result = await deleteCPProjectsByIds(ids);
+
+      const result = useCurrentCollection
+        ? await deleteDocumentsInCollection(selectedCollectionName, ids)
+        : await deleteCPProjectsByIds(ids);
+
       // Remove from local state
-      setMappings((prev) => prev.filter((m) => (m.status || 'Ongoing') !== status));
-      setMainMappings((prev) => (Array.isArray(prev) ? prev.filter((m) => (m.status || 'Ongoing') !== status) : prev));
+      if (deleteAllInCurrentPendingCollection) {
+        setMappings([]);
+        setMainMappings([]);
+      } else {
+        setMappings((prev) => prev.filter((m) => !matchesStatus(m)));
+        setMainMappings((prev) => (Array.isArray(prev) ? prev.filter((m) => !matchesStatus(m)) : prev));
+      }
       return result;
     } catch (error) {
       console.error('Error deleting all by status:', error);

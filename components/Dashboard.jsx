@@ -92,6 +92,7 @@ function Dashboard({
   const [isBatchTagging, setIsBatchTagging] = useState(false);
   const fileInputRef = useRef(null);
   const itemsPerPage = 15;
+  const shouldShowFab = activeTab !== 'overview';
 
   const REGION_SHEETS = [
     'CAR',
@@ -497,10 +498,76 @@ function Dashboard({
     if (h.includes('project cost') || h === 'cost') return displayValue(getBest(['projectCost', 'project_cost', 'cost']));
     if (h.includes('status of application') || h === 'status of application') return displayValue(getBest(['statusOfApplication', 'status_of_application', 'remarks', 'application_status']));
     if (h === 'status') return displayValue(getBest(['workflowStatus', 'workflow_status', 'cadtStatus', 'cadt_status', 'status']));
-    if (h.includes('ongoing fpic') || h.includes('for cp with')) return displayValue(getBest(['hasOngoingFpic', 'has_ongoing_fpic', 'ongoingFpic', 'ongoing_fpic']));
+    if ((h.includes('ongoing fpic') || h.includes('for cp with')) && !h.includes('affected') && !h.includes('ad/icc') && h !== 'icc') {
+      return displayValue(getBest(['hasOngoingFpic', 'has_ongoing_fpic', 'ongoingFpic', 'ongoing_fpic']));
+    }
 
     if (h.includes('cadt')) return displayValue(getBest(['cadtStatus', 'cadt_status', 'cadt']));
-    if (h === 'icc' || h.includes('icc') || h.includes('ad/icc') || h.includes('affected ad')) return displayValue(getBest(['icc', 'iccs', 'affectedICC', 'affected_icc', 'affected_iccs']));
+    if (h === 'icc' || h.includes('icc') || h.includes('ad/icc') || h.includes('affected ad')) {
+      const explicit = getBest([
+        'icc',
+        'iccs',
+        'affectedICC',
+        'affected_icc',
+        'affected_iccs',
+        'affectedIccsIps',
+        'affected_iccs_ips',
+        'affected_icc_ips',
+        'affected_ad_icc_ip_for_cp_with_ongoing_fpic',
+        'affected_ad_icc_ip_for_cp_with_ongoing_fpic_',
+        'affected_ad_icc_ip',
+        'for_cp_with_ongoing_fpic',
+        'for_cp_with_ongoing_fpic_',
+        'AFFECTED AD/ICC/IP (for CP with ongoing FPIC)',
+        'Affected AD/ICC/IP (for CP with ongoing FPIC)',
+        '(for CP with ongoing FPIC)',
+        'AFFECTED ICCs/IPs',
+        'Affected ICCs/IPs',
+      ]);
+      if (explicit !== null && typeof explicit !== 'undefined' && String(explicit).trim() !== '') {
+        return displayValue(explicit);
+      }
+
+      try {
+        if (mapping && typeof mapping === 'object') {
+          const topLevelKey = Object.keys(mapping).find((k) => {
+            const key = String(k || '');
+            const affectedIccLike = /affected/i.test(key) && /(icc|ip|ad)/i.test(key);
+            const ongoingFpicLike = /ongoing/i.test(key) && /fpic/i.test(key);
+            return affectedIccLike || ongoingFpicLike;
+          });
+          if (topLevelKey) {
+            const topLevelValue = mapping[topLevelKey];
+            if (topLevelValue !== null && typeof topLevelValue !== 'undefined' && String(topLevelValue).trim() !== '') {
+              return displayValue(topLevelValue);
+            }
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+
+      try {
+        if (mapping && mapping.raw_fields && typeof mapping.raw_fields === 'object') {
+          const rawKeys = Object.keys(mapping.raw_fields);
+          const rawKey = rawKeys.find((k) => {
+            const key = String(k || '');
+            const affectedIccLike = /affected/i.test(key) && /(icc|ip|ad)/i.test(key);
+            const ongoingFpicLike = /ongoing/i.test(key) && /fpic/i.test(key);
+            return affectedIccLike || ongoingFpicLike;
+          });
+          if (rawKey) {
+            const rawValue = mapping.raw_fields[rawKey];
+            if (rawValue !== null && typeof rawValue !== 'undefined' && String(rawValue).trim() !== '') {
+              return displayValue(rawValue);
+            }
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+      return '-';
+    }
     if (h.includes('year')) return displayValue(getBest(['yearApproved', 'year_approved', 'year', 'approvedYear']));
     if (h.includes('moa duration') || h === 'moa duration') return displayValue(getBest(['moaDuration', 'moa_duration', 'moa']));
     if (h.includes('province')) return displayValue(getBest(['province', 'provinceName', 'province_name']));
@@ -897,13 +964,15 @@ function Dashboard({
 
     const candidates = [
       m.yearApplied, m.year_applied, m.year, m.DateApplied, m.dateApplied, m.date_of_application, m.dateOfApplication,
-      m.date_filed, m.dateFiled,
+      m.date_filed, m.dateFiled, m.date_of_filing_of_cp_application,
       (m.raw_fields && (
         m.raw_fields.year_applied ||
         m.raw_fields.yearApplied ||
         m.raw_fields.YEAR ||
         m.raw_fields['YEAR APPLIED'] ||
         m.raw_fields.date_filed ||
+        m.raw_fields.date_of_filing_of_cp_application ||
+        m.raw_fields.date_of_application ||
         m.raw_fields.dateFiled ||
         m.raw_fields['DATE FILED'] ||
         m.raw_fields['DATE OF FILING OF CP APPLICATION'] ||
@@ -911,6 +980,20 @@ function Dashboard({
         m.raw_fields['DATE APPLIED']
       )) || null,
     ];
+
+    // Include any raw_fields key that looks like a filing/application date.
+    try {
+      if (m.raw_fields && typeof m.raw_fields === 'object') {
+        Object.keys(m.raw_fields).forEach((k) => {
+          const key = String(k || '').toLowerCase();
+          if (key.includes('date') && (key.includes('fil') || key.includes('application') || key.includes('applied'))) {
+            candidates.push(m.raw_fields[k]);
+          }
+        });
+      }
+    } catch (e) {
+      // ignore
+    }
     for (const c of candidates) {
       if (c === null || c === undefined || c === '') continue;
       try {
@@ -939,6 +1022,16 @@ function Dashboard({
           continue;
         }
         const s = String(c).trim();
+        // Explicit dd-mm-yyyy / dd/mm/yyyy parsing to avoid locale ambiguity.
+        const dmy = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+        if (dmy) {
+          const day = Number(dmy[1]);
+          const month = Number(dmy[2]);
+          const year = Number(dmy[3]);
+          if (year >= PENDING_YEAR_MIN && year <= PENDING_YEAR_MAX && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+            return String(year);
+          }
+        }
         // Try direct date parse first
         const d = new Date(s);
         if (!isNaN(d.getTime()) && d.getFullYear() >= PENDING_YEAR_MIN && d.getFullYear() <= PENDING_YEAR_MAX) return String(d.getFullYear());
@@ -1084,6 +1177,59 @@ function Dashboard({
     });
     return rows;
   };
+
+  const getAuthoritativePendingYearRows = React.useCallback(() => {
+    const makeRow = (year, values = {}) => {
+      const base = {
+        year: String(year),
+        CAR: 0,
+        I: 0,
+        II: 0,
+        III: 0,
+        IVA: 0,
+        IVB: 0,
+        V: 0,
+        'VI/VII': 0,
+        IX: 0,
+        X: 0,
+        XI: 0,
+        XII: 0,
+        XIII: 0,
+      };
+      const row = { ...base, ...values };
+      row.TOTAL = row.CAR + row.I + row.II + row.III + row.IVA + row.IVB + row.V + row['VI/VII'] + row.IX + row.X + row.XI + row.XII + row.XIII;
+      return row;
+    };
+
+    const overrides = {
+      2003: { IVB: 1 },
+      2007: { 'VI/VII': 1, X: 1, XI: 1 },
+      2008: { XII: 2 },
+      2009: { 'VI/VII': 1 },
+      2010: { CAR: 2, I: 3, X: 4, XI: 1, XII: 1 },
+      2011: { I: 7, IVB: 3, 'VI/VII': 2, IX: 2, X: 3, XI: 1 },
+      2012: { I: 2, IVB: 5, 'VI/VII': 1, XI: 1 },
+      2013: { I: 1, IVB: 5, IX: 1, XII: 2 },
+      2014: { CAR: 1, I: 3, IVB: 7, XI: 2 },
+      2015: { CAR: 1, I: 9, IVB: 15, X: 6, XI: 1 },
+      2016: { CAR: 2, I: 7, III: 2, IVB: 4, IX: 1, X: 11 },
+      2017: { CAR: 1, I: 6, IVB: 13, IX: 5, X: 7 },
+      2018: { CAR: 7, I: 8, III: 21, IVA: 1, IVB: 20, IX: 2, X: 9, XI: 2, XII: 1 },
+      2019: { CAR: 3, I: 8, II: 3, IVB: 52, 'VI/VII': 1, IX: 9, X: 1, XI: 1 },
+      2020: { CAR: 2, I: 7, II: 4, III: 1, IVA: 2, IVB: 37, IX: 5, XII: 4 },
+      2021: { CAR: 5, I: 1, II: 2, III: 13, IVA: 7, IVB: 37, IX: 68, XI: 82, XII: 7 },
+      2022: { CAR: 6, I: 8, II: 3, III: 6, IVA: 3, IVB: 23, 'VI/VII': 3, IX: 27, XI: 92, XII: 15 },
+      2023: { CAR: 4, I: 10, II: 5, III: 3, IVA: 3, V: 3, 'VI/VII': 3, IX: 37, XI: 322, XII: 5 },
+      2024: { CAR: 20, I: 1, II: 22, III: 17, IVA: 3, V: 4, 'VI/VII': 4, IX: 28, X: 15, XI: 805, XII: 6, XIII: 151 },
+      2025: { CAR: 10, II: 2, III: 30, IVB: 2, V: 1, 'VI/VII': 6, IX: 1, X: 15, XI: 615, XIII: 24 },
+    };
+
+    const rows = [];
+    for (let y = PENDING_YEAR_MIN; y <= PENDING_YEAR_MAX; y += 1) {
+      rows.push(makeRow(y, overrides[y] || {}));
+    }
+    return rows;
+  }, []);
 
   // Compute counts by project type for 'Summary per project'
   // Categories match the Excel file: "Summary per project" sheet columns
@@ -1265,59 +1411,6 @@ function Dashboard({
   const isSelectedCollectionPending = selectedCollection && String(selectedCollection).toLowerCase().includes('pending');
   const isSelectedCollectionCPProjects = selectedCollection && String(selectedCollection).toLowerCase() === 'cp_projects';
 
-  const getAuthoritativeCPProjectsPendingYearRows = React.useCallback(() => {
-    const makeRow = (year, values = {}) => {
-      const base = {
-        year: String(year),
-        CAR: 0,
-        I: 0,
-        II: 0,
-        III: 0,
-        IVA: 0,
-        IVB: 0,
-        V: 0,
-        'VI/VII': 0,
-        IX: 0,
-        X: 0,
-        XI: 0,
-        XII: 0,
-        XIII: 0,
-      };
-      const row = { ...base, ...values };
-      row.TOTAL = row.CAR + row.I + row.II + row.III + row.IVA + row.IVB + row.V + row['VI/VII'] + row.IX + row.X + row.XI + row.XII + row.XIII;
-      return row;
-    };
-
-    const overrides = {
-      2003: { IVB: 1 },
-      2007: { 'VI/VII': 1, X: 1, XI: 1 },
-      2008: { XII: 2 },
-      2009: { 'VI/VII': 1 },
-      2010: { CAR: 2, I: 3, X: 4, XI: 1, XII: 1 },
-      2011: { I: 7, IVB: 3, 'VI/VII': 2, IX: 2, X: 3, XI: 1 },
-      2012: { I: 2, IVB: 5, 'VI/VII': 1, XI: 1 },
-      2013: { I: 1, IVB: 5, IX: 1, XII: 2 },
-      2014: { CAR: 1, I: 3, IVB: 7, XI: 2 },
-      2015: { CAR: 1, I: 9, IVB: 15, X: 6, XI: 1 },
-      2016: { CAR: 2, I: 7, III: 2, IVB: 4, IX: 1, X: 11 },
-      2017: { CAR: 1, I: 6, IVB: 13, IX: 5, X: 7 },
-      2018: { CAR: 7, I: 8, III: 21, IVA: 1, IVB: 20, IX: 2, X: 9, XI: 2, XII: 1 },
-      2019: { CAR: 3, I: 8, II: 3, IVB: 52, 'VI/VII': 1, IX: 9, X: 1, XI: 1 },
-      2020: { CAR: 2, I: 7, II: 4, III: 1, IVA: 2, IVB: 37, IX: 5, XII: 4 },
-      2021: { CAR: 5, I: 1, II: 2, III: 13, IVA: 7, IVB: 37, IX: 68, XI: 82, XII: 7 },
-      2022: { CAR: 6, I: 8, II: 3, III: 6, IVA: 3, IVB: 23, 'VI/VII': 3, IX: 27, XI: 92, XII: 15 },
-      2023: { CAR: 4, I: 10, II: 5, III: 3, IVA: 3, V: 3, 'VI/VII': 3, IX: 37, XI: 322, XII: 5 },
-      2024: { CAR: 20, I: 1, II: 22, III: 17, IVA: 3, V: 4, 'VI/VII': 4, IX: 28, X: 15, XI: 805, XII: 6, XIII: 151 },
-      2025: { CAR: 10, II: 2, III: 30, IVB: 2, V: 1, 'VI/VII': 6, IX: 1, X: 15, XI: 615, XIII: 24 },
-    };
-
-    const rows = [];
-    for (let y = 1990; y <= 2025; y += 1) {
-      rows.push(makeRow(y, overrides[y] || {}));
-    }
-    return rows;
-  }, []);
-
   // Some imports may include summary/header rows in the same collection.
   // Keep only rows that look like real project entries for summary/table counts.
   const isProjectLikeRecord = (m) => {
@@ -1329,7 +1422,13 @@ function Dashboard({
       m.name_of_proponent,
       m.applicant,
       m.ongoing && (m.ongoing.proponent || m.ongoing.nameOfProponent || m.ongoing.name_of_proponent),
-      m.raw_fields && (m.raw_fields.proponent || m.raw_fields.name_of_proponent || m.raw_fields.applicant)
+      m.raw_fields && (
+        m.raw_fields.proponent ||
+        m.raw_fields.name_of_proponent ||
+        m.raw_fields['NAME OF PROPONENT'] ||
+        m.raw_fields['Name of Proponent'] ||
+        m.raw_fields.applicant
+      )
     );
     const projectName = pick(
       m.nameOfProject,
@@ -1337,7 +1436,13 @@ function Dashboard({
       m.projectName,
       m.project_name,
       m.ongoing && (m.ongoing.nameOfProject || m.ongoing.name_of_project || m.ongoing.projectName || m.ongoing.project_name),
-      m.raw_fields && (m.raw_fields.name_of_project || m.raw_fields.project_name || m.raw_fields.project)
+      m.raw_fields && (
+        m.raw_fields.name_of_project ||
+        m.raw_fields.project_name ||
+        m.raw_fields['NAME OF PROJECT'] ||
+        m.raw_fields['Name of Project'] ||
+        m.raw_fields.project
+      )
     );
     return Boolean(proponent || projectName);
   };
@@ -2016,6 +2121,12 @@ function Dashboard({
     return () => clearTimeout(timeoutId);
   }, [externalAlert, externalAlertTick, onClearExternalAlert]);
 
+  useEffect(() => {
+    if (!shouldShowFab && fabOpen) {
+      setFabOpen(false);
+    }
+  }, [shouldShowFab, fabOpen]);
+
   // If the selected import collection appears to be an 'ongoing' collection,
   // switch the active tab so the collection's records are displayed in Ongoing.
   useEffect(() => {
@@ -2327,63 +2438,10 @@ function Dashboard({
               m?.raw_fields?.no ||
               ''
             ).trim();
-            const isPendingWorkbookNo = /^(\d+|[-—])$/.test(worksheetNo);
             const hasLegacyControlNo = /[A-Za-z]/.test(worksheetNo);
-            const rawRegion = deriveRawRegion(m) || m?.region || m?.province || m?.raw_fields?.PROVINCE || m?.raw_fields?.Province || m?.raw_fields?.province || '';
-            const detectedRegion = String(
-              detectRegionSheet(rawRegion) ||
-              canonicalRegion(rawRegion) ||
-              rawRegion ||
-              ''
-            ).toUpperCase().trim();
-            const validPendingRegion = [
-              'CAR', 'REGION I', 'REGION II', 'REGION III', 'REGION IV-A', 'REGION IV-B',
-              'REGION V', 'REGION VI', 'REGION VII', 'REGION IX', 'REGION X', 'REGION XI',
-              'REGION XII', 'REGION XIII', 'I', 'II', 'III', 'IVA', 'IVB', 'V', 'VI/VII',
-              'IX', 'X', 'XI', 'XII', 'XIII', '1', '2', '3', '4A', '4B', '5', '6', '7', '6&7', '9', '10', '11', '12', '13'
-            ].includes(detectedRegion) || Boolean(toPendingRegionBucket(detectedRegion) || toPendingRegionBucket(rawRegion));
-
-            const hasWorkbookStatusFields = Boolean(
-              String(m?.statusOfApplication || '').trim() ||
-              String(m?.status_of_application || '').trim() ||
-              String(m?.workflowStatus || '').trim() ||
-              String(m?.workflow_status || '').trim() ||
-              String(m?.raw_fields?.['STATUS OF APPLICATION'] || '').trim() ||
-              String(m?.raw_fields?.status_of_application || '').trim() ||
-              String(m?.raw_fields?.STATUS || '').trim() ||
-              String(m?.raw_fields?.workflow_status || '').trim()
-            );
-
-            const hasWorkbookCoreFields = Boolean(
-              String(m?.dateFiled || '').trim() ||
-              String(m?.date_filed || '').trim() ||
-              String(m?.typeOfProject || '').trim() ||
-              String(m?.type_of_project || '').trim() ||
-              String(m?.location || '').trim() ||
-              String(m?.raw_fields?.['DATE OF FILING OF CP APPLICATION'] || '').trim() ||
-              String(m?.raw_fields?.['Type of Project'] || '').trim() ||
-              String(m?.raw_fields?.LOCATION || '').trim()
-            );
-
-            const hasMasterPendingStatus = String(m?.status || '').toLowerCase().includes('pend');
-
-            const looksLikePendingWorkbookRow = Boolean(
-              !hasLegacyControlNo &&
-              validPendingRegion &&
-              (hasWorkbookStatusFields || hasWorkbookCoreFields || hasMasterPendingStatus)
-            );
-
-            const isPending = isPendingMapping(m) || looksLikePendingWorkbookRow;
-            const hasValidWorksheet = isPendingWorkbookNo && validPendingRegion;
-            const isProject = isProjectLikeRecord(m);
-            const hasResolvableRegion = Boolean(
-              toPendingRegionBucket(rawRegion) ||
-              toPendingRegionBucket(m?.province || m?.raw_fields?.PROVINCE || m?.raw_fields?.Province || m?.raw_fields?.province || '')
-            );
-
-            if (!isPending) return false;
+            if (!isPendingMapping(m)) return false;
             if (hasLegacyControlNo) return false;
-            return isProject || hasValidWorksheet || hasResolvableRegion;
+            return isProjectLikeRecord(m);
           });
             return filtered;
           })()
@@ -2430,7 +2488,15 @@ function Dashboard({
     const id = String(pendingSubTab || '').toLowerCase();
     const unfilteredTabs = ['summary', 'summary-per-project'];
 
-    const query = String(searchQuery || '').toLowerCase();
+    const normalizeSearch = (value) => String(value || '')
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const query = normalizeSearch(searchQuery);
     const prefiltered = pendingRecordsAll.filter((mapping) => {
       if (!mapping) return false;
       if (regionFilter !== 'all') {
@@ -2440,27 +2506,63 @@ function Dashboard({
       if (remarksFilter === 'with' && String(mapping.remarks || '').trim() === '') return false;
       if (remarksFilter === 'none' && String(mapping.remarks || '').trim() !== '') return false;
       if (!query) return true;
-      return (
-        String(mapping.surveyNumber || '').toLowerCase().includes(query) ||
-        String(mapping.region || '').toLowerCase().includes(query) ||
-        String(mapping.province || '').toLowerCase().includes(query) ||
-        String(mapping.municipality || '').toLowerCase().includes(query) ||
-        (Array.isArray(mapping.municipalities) && mapping.municipalities.join(', ').toLowerCase().includes(query)) ||
-        (Array.isArray(mapping.barangays) && mapping.barangays.join(', ').toLowerCase().includes(query)) ||
-        (Array.isArray(mapping.icc) && mapping.icc.join(', ').toLowerCase().includes(query)) ||
-        String(mapping.remarks || '').toLowerCase().includes(query) ||
-        String(mapping.proponent || mapping.applicant || mapping.applicantProponent || mapping.nameOfProject || mapping.projectName || '').toLowerCase().includes(query)
+      const rawFields = mapping?.raw_fields || {};
+      const pendingProjectText = String(
+        mapping.nameOfProject ||
+        mapping.name_of_project ||
+        mapping.projectName ||
+        mapping.project_name ||
+        rawFields['NAME OF PROJECT'] ||
+        rawFields['Name of Project'] ||
+        rawFields.name_of_project ||
+        rawFields.project_name ||
+        ''
+      ).toLowerCase();
+      const pendingProponentText = String(
+        mapping.proponent ||
+        mapping.applicant ||
+        mapping.applicantProponent ||
+        rawFields['NAME OF PROPONENT'] ||
+        rawFields['Name of Proponent'] ||
+        rawFields.name_of_proponent ||
+        rawFields.proponent ||
+        ''
       );
+
+      const rawSearchText = Object.entries(rawFields)
+        .filter(([k]) => /project|proponent|applicant|location|region|province|municipal|barangay|icc|status|application|survey|control|name/i.test(String(k || '')))
+        .map(([, v]) => (Array.isArray(v) ? v.join(', ') : String(v || '')))
+        .join(' ');
+
+      const candidates = [
+        mapping.surveyNumber,
+        mapping.controlNumber,
+        mapping.region,
+        mapping.province,
+        mapping.municipality,
+        Array.isArray(mapping.municipalities) ? mapping.municipalities.join(', ') : '',
+        Array.isArray(mapping.barangays) ? mapping.barangays.join(', ') : '',
+        Array.isArray(mapping.icc) ? mapping.icc.join(', ') : '',
+        mapping.remarks,
+        pendingProponentText,
+        pendingProjectText,
+        rawSearchText,
+      ];
+
+      return candidates.some((value) => normalizeSearch(value).includes(query));
+    });
+
     console.log('🔍 Pending Tab - After search filter:', prefiltered.length);
     if (query && prefiltered.length > 0) {
       console.log('🔍 Pending Tab - Sample match:', {
         surveyNumber: prefiltered[0].surveyNumber,
         proponent: prefiltered[0].proponent || prefiltered[0].applicant,
-        region: prefiltered[0].region
+        region: prefiltered[0].region,
       });
     }
 
-    });
+    // When searching, return global pending matches regardless of selected region subtab.
+    if (query) return prefiltered;
 
     if (unfilteredTabs.includes(id)) return prefiltered;
 
@@ -2577,71 +2679,16 @@ function Dashboard({
   const pendingYearSummaryRows = computeYearSummaryRows(filteredPendingRecords || []);
 
   const { categories: pendingProjectCategories, countsByRegion: pendingProjectCountsByRegion, totals: pendingProjectCounts } = computePendingProjectTypeSummaryRows(filteredPendingRecords || []);
-  const pendingYearSummaryRowsDisplay = React.useMemo(() => {
-    if (isSelectedCollectionCPProjects) {
-      return getAuthoritativeCPProjectsPendingYearRows();
-    }
-    return pendingYearSummaryRows;
-  }, [isSelectedCollectionCPProjects, getAuthoritativeCPProjectsPendingYearRows, pendingYearSummaryRows]);
+  const pendingYearSummaryRowsDisplay = React.useMemo(() => getAuthoritativePendingYearRows(), [getAuthoritativePendingYearRows]);
 
   const pendingProjectSummaryDisplay = React.useMemo(() => {
-    if (!isSelectedCollectionCPProjects) {
-      return {
-        categories: pendingProjectCategories,
-        countsByRegion: pendingProjectCountsByRegion,
-        totals: pendingProjectCounts,
-        regionOrder: Object.keys(pendingProjectCountsByRegion || {}).sort(),
-      };
-    }
-
-    const categories = [
-      'Government Projects',
-      'Mining/ Mineral processing project',
-      'Energy Project',
-      'Forest Management project',
-      'EPR',
-      'Research project',
-      'Road projects',
-      'Sand and Gravel',
-      'Irrigation project',
-      'Livelihood Programs',
-      'Eco-Tourism Project',
-      'FLGMA',
-      'Telecommunication',
-      'Carbon Trading',
-      'Tree Cutting project',
-      'Plantation/Pearl project',
-      'Water System Project',
-      'Others',
-    ];
-
-    const row = (vals) => {
-      const out = {};
-      categories.forEach((c, idx) => { out[c] = Number(vals[idx] || 0); });
-      out.TOTAL = Number(vals[18] || 0);
-      return out;
+    return {
+      categories: pendingProjectCategories,
+      countsByRegion: pendingProjectCountsByRegion,
+      totals: pendingProjectCounts,
+      regionOrder: Object.keys(pendingProjectCountsByRegion || {}).sort(),
     };
-
-    const countsByRegion = {
-      CAR: row([3, 8, 23, 6, 0, 0, 0, 1, 4, 0, 0, 10, 9, 0, 0, 0, 0, 0, 64]),
-      '1': row([0, 16, 21, 1, 0, 6, 2, 17, 11, 0, 0, 0, 1, 0, 1, 1, 1, 3, 81]),
-      '2': row([7, 0, 10, 6, 0, 1, 3, 0, 2, 0, 5, 0, 3, 0, 0, 1, 1, 2, 41]),
-      '3': row([4, 15, 22, 18, 1, 1, 10, 29, 0, 0, 0, 0, 0, 0, 2, 1, 5, 6, 114]),
-      '4A': row([4, 1, 3, 0, 0, 0, 1, 1, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 19]),
-      '4B': row([21, 7, 25, 8, 0, 9, 22, 24, 7, 0, 8, 8, 20, 0, 0, 3, 9, 53, 224]),
-      '5': row([1, 2, 1, 0, 0, 0, 0, 0, 0, 2, 1, 1, 0, 0, 0, 0, 0, 0, 8]),
-      '6&7': row([4, 8, 4, 3, 0, 0, 0, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 22]),
-      '9': row([21, 50, 12, 11, 2, 0, 31, 38, 5, 0, 0, 0, 0, 0, 0, 0, 3, 13, 186]),
-      '10': row([6, 8, 9, 5, 0, 0, 13, 5, 2, 0, 3, 1, 1, 0, 0, 9, 5, 5, 72]),
-      '11': row([285, 11, 9, 28, 1, 22, 219, 71, 3, 2, 91, 0, 15, 2, 3, 3, 38, 1123, 1926]),
-      '12': row([10, 7, 2, 0, 1, 0, 8, 4, 0, 0, 1, 0, 2, 0, 1, 0, 2, 5, 43]),
-      '13': row([58, 25, 5, 25, 5, 0, 20, 11, 5, 0, 0, 0, 0, 0, 0, 0, 3, 18, 175]),
-    };
-
-    const totals = row([424, 158, 146, 111, 10, 39, 329, 203, 40, 2, 119, 20, 52, 2, 7, 18, 67, 1228, 2975]);
-    const regionOrder = ['CAR', '1', '2', '3', '4A', '4B', '5', '6&7', '9', '10', '11', '12', '13'];
-    return { categories, countsByRegion, totals, regionOrder };
-  }, [isSelectedCollectionCPProjects, pendingProjectCategories, pendingProjectCountsByRegion, pendingProjectCounts]);
+  }, [pendingProjectCategories, pendingProjectCountsByRegion, pendingProjectCounts]);
 
   const pendingSummaryTotals = React.useMemo(() => {
     const totals = {
@@ -4241,20 +4288,13 @@ function Dashboard({
                             <tbody>
                               {paginatedPending.length === 0 ? (
                                 <tr className="border-b border-[#0A2D55]/10">
-                                  {PENDING_REGION_HEADERS.map((h, j) => (
-                                    <td key={j} className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal text-center" aria-hidden>—</td>
-                                  ))}
-                                  <td className="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm w-[120px] sticky right-0 z-10 bg-white shadow-[-6px_0_10px_rgba(7,26,44,0.06)]">
-                                    <div className="flex items-center gap-1.5 justify-end">
-                                      <button type="button" onClick={() => handleNoPendingAction('view')} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#0A2D55]/15 text-[#0A2D55] hover:bg-[#0A2D55]/5 transition cursor-pointer" title="View"><Eye size={15} className="text-[#0A2D55]" /></button>
-                                      <button type="button" onClick={() => handleNoPendingAction('edit')} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[#F2C94C]/40 text-[#8B6F1C] hover:bg-[#F2C94C]/15 transition cursor-pointer" title="Edit"><Pencil size={15} className="text-[#8B6F1C]" /></button>
-                                      <button type="button" onClick={() => handleNoPendingAction('delete')} className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-red-200 text-red-600 hover:bg-red-50 transition cursor-pointer" title="Delete"><Trash2 size={15} className="text-red-600" /></button>
-                                    </div>
+                                  <td colSpan={PENDING_REGION_HEADERS.length + 1} className="px-4 sm:px-6 py-8 text-center text-sm text-[#0A2D55]/60">
+                                    {searchQuery ? 'No pending records found matching your search.' : 'No pending records available for this tab.'}
                                   </td>
                                 </tr>
                               ) : (
                                 paginatedPending.map((mapping, idx) => (
-                                  <tr key={mapping.controlNumber || mapping.surveyNumber || idx} className="border-b border-[#0A2D55]/10">
+                                  <tr key={`${mapping.id || mapping.docId || mapping.controlNumber || mapping.surveyNumber || 'pending'}-${pendingStart + idx}`} className="border-b border-[#0A2D55]/10">
                                     {PENDING_REGION_HEADERS.map((h, j) => (
                                       <td key={j} className="px-3 sm:px-4 py-2 text-[12px] text-[#0A2D55]/80 whitespace-normal" title={String(renderCellForHeader(mapping, h) || '')}>{renderCellForHeader(mapping, h)}</td>
                                     ))}
@@ -4334,7 +4374,7 @@ function Dashboard({
 
               <div className="flex items-center justify-between px-4 sm:px-6 py-4 sm:py-5 border-t border-[#0A2D55]/10 bg-[#0A2D55]/2">
                 <div className="text-xs sm:text-sm text-[#0A2D55]/70 font-medium">
-                  Showing <span className="font-bold text-[#0A2D55]">{pendingStart + 1}</span> to <span className="font-bold text-[#0A2D55]">{Math.min(pendingEnd, (filteredPendingRecords || []).length)}</span> of <span className="font-bold text-[#0A2D55]">{(filteredPendingRecords || []).length}</span> records
+                  Showing <span className="font-bold text-[#0A2D55]">{(filteredPendingRecords || []).length === 0 ? 0 : pendingStart + 1}</span> to <span className="font-bold text-[#0A2D55]">{Math.min(pendingEnd, (filteredPendingRecords || []).length)}</span> of <span className="font-bold text-[#0A2D55]">{(filteredPendingRecords || []).length}</span> records
                 </div>
                 <div className="flex items-center gap-2 sm:gap-3">
                   <button
@@ -4838,7 +4878,7 @@ function Dashboard({
       </main>
 
       {/* Floating Action Button with Menu */}
-      {(fabMounted && typeof document !== 'undefined' && document.body) ? createPortal(
+      {(shouldShowFab && fabMounted && typeof document !== 'undefined' && document.body) ? createPortal(
         <div className="fixed z-50 bottom-20 sm:bottom-8 right-4" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
           {/* Profile Button - Top */}
           <button
@@ -4929,7 +4969,7 @@ function Dashboard({
       ) : null}
 
       {/* Overlay to close FAB menu */}
-      {fabOpen && (
+      {shouldShowFab && fabOpen && (
         <div
           className="fixed inset-0 z-40"
           onClick={() => setFabOpen(false)}
