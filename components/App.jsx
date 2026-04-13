@@ -590,13 +590,30 @@ export function App() {
         ? await deleteDocumentsInCollection(selectedCollectionName, ids)
         : await deleteCPProjectsByIds(ids);
 
-      // Remove from local state
-      if (deleteAllInCurrentPendingCollection) {
-        setMappings([]);
-        setMainMappings([]);
-      } else {
-        setMappings((prev) => prev.filter((m) => !matchesStatus(m)));
-        setMainMappings((prev) => (Array.isArray(prev) ? prev.filter((m) => !matchesStatus(m)) : prev));
+      // Reload from the source collection so the UI reflects the actual
+      // Firestore state instead of relying on a potentially stale local filter.
+      try {
+        if (useCurrentCollection) {
+          const refreshed = await getMappingsFromCollection(selectedCollectionName);
+          setMappings(refreshed);
+          if (selectedCollectionName === 'cp_projects') {
+            setMainMappings(refreshed);
+          }
+        } else {
+          const refreshed = await getAllCPProjects();
+          setMappings(refreshed);
+          setMainMappings(refreshed);
+        }
+      } catch (reloadErr) {
+        console.warn('Failed to reload after delete-by-status:', reloadErr);
+        // Fallback to local pruning if refresh fails.
+        if (deleteAllInCurrentPendingCollection) {
+          setMappings([]);
+          setMainMappings([]);
+        } else {
+          setMappings((prev) => prev.filter((m) => !matchesStatus(m)));
+          setMainMappings((prev) => (Array.isArray(prev) ? prev.filter((m) => !matchesStatus(m)) : prev));
+        }
       }
       return result;
     } catch (error) {

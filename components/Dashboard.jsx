@@ -172,22 +172,11 @@ function Dashboard({
       const regionSource = deriveRawRegion(m) || m.region || m.province || m.raw_fields?.PROVINCE || m.raw_fields?.Province || m.raw_fields?.province || '';
       const regionBucket = toPendingRegionBucket(regionSource) || toPendingRegionBucket(canonicalRegion(regionSource));
 
-      const hasMeaningfulContent = Boolean(
-        m.proponent ||
-        m.nameOfProject ||
-        m.projectName ||
-        m.location ||
-        m.province ||
-        m.municipality ||
-        m.remarks ||
-        m.statusOfApplication ||
-        m.icc ||
-        m.iccs ||
-        (m.raw_fields && Object.values(m.raw_fields).some((v) => String(v || '').trim() && String(v || '').trim() !== '-' && String(v || '').trim() !== '—'))
-      );
-
-      // Accept rows with proper workbook structure, or rows with meaningful content (manual entries)
-      return (hasPendingWorksheetNo && regionBucket && hasMeaningfulContent) || hasMeaningfulContent;
+      // Accept rows that are explicitly pending, or rows that still have the
+      // workbook-style structure of a pending row (worksheet number + region).
+      // Manual pending entries are saved with _pending/status='Pending', so they
+      // still pass the early returns above.
+      return Boolean(hasPendingWorksheetNo && regionBucket);
     } catch (e) {
       return false;
     }
@@ -544,17 +533,34 @@ function Dashboard({
       return null;
     };
 
-    // For pending form entries, also try Excel header keys directly in raw_fields
+    // For pending form entries, try raw_fields keys directly and by normalized header shape.
     const tryExcelHeaders = (excelHeaders) => {
       if (!mapping || !mapping.raw_fields || typeof mapping.raw_fields !== 'object') return null;
+      const raw = mapping.raw_fields;
+      const normalizeHeaderKey = (s) => String(s || '')
+        .trim()
+        .toUpperCase()
+        .replace(/[\u00A0\t\r\n]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .replace(/[^A-Z0-9]+/g, '');
+
       for (const excelKey of excelHeaders) {
-        const val = mapping.raw_fields[excelKey];
-        if (val !== null && typeof val !== 'undefined' && String(val).trim() !== '') return String(val).trim();
+        const direct = raw[excelKey];
+        if (direct !== null && typeof direct !== 'undefined' && String(direct).trim() !== '') return String(direct).trim();
+      }
+
+      const normalizedTarget = new Set((excelHeaders || []).map((k) => normalizeHeaderKey(k)));
+      for (const [rawKey, rawValue] of Object.entries(raw)) {
+        if (rawValue === null || typeof rawValue === 'undefined') continue;
+        const s = String(rawValue).trim();
+        if (!s || s === '-' || s === '—') continue;
+        const nk = normalizeHeaderKey(rawKey);
+        if (normalizedTarget.has(nk)) return s;
       }
       return null;
     };
 
-    if (h === 'no.' || h === 'no' || h === '#') return displayValue(getBest(['worksheetNo', 'worksheet_no', 'surveyNumber', 'survey_number', 'controlNumber', 'control_number']) || tryExcelHeaders(['NO', 'No', 'no']));
+    if (h === 'no.' || h === 'no' || h === '#') return displayValue(getBest(['worksheetNo', 'worksheet_no', 'surveyNumber', 'survey_number', 'controlNumber', 'control_number']) || tryExcelHeaders(['NO', 'No', 'no', 'NO.']));
     if (h === 'region') {
       const raw = getBest(['region', 'regionName', 'region_name']) || tryExcelHeaders(['REGION', 'Region']) || mapping.region;
       const canon = canonicalRegion(raw);
@@ -1040,6 +1046,9 @@ function Dashboard({
 
   const getYearFromMapping = (m) => {
     if (!m) return 'Unknown';
+    const raw = m.raw_fields && typeof m.raw_fields === 'object' ? m.raw_fields : {};
+    const rawNested = raw.raw_fields && typeof raw.raw_fields === 'object' ? raw.raw_fields : {};
+
     // Convert an Excel serial date number to a calendar year
     const excelSerialToYear = (n) => {
       // Excel epoch: Jan 1 1900 = serial 1 (with leap-year bug: serial 60 = Feb 29 1900, doesn't exist)
@@ -1055,32 +1064,44 @@ function Dashboard({
     const candidates = [
       m.yearApplied, m.year_applied, m.year, m.DateApplied, m.dateApplied, m.date_of_application, m.dateOfApplication,
       m.date_filed, m.dateFiled, m.date_of_filing_of_cp_application,
-      (m.raw_fields && (
-        m.raw_fields.year_applied ||
-        m.raw_fields.yearApplied ||
-        m.raw_fields.YEAR ||
-        m.raw_fields['YEAR APPLIED'] ||
-        m.raw_fields.date_filed ||
-        m.raw_fields.date_of_filing_of_cp_application ||
-        m.raw_fields.date_of_application ||
-        m.raw_fields.dateFiled ||
-        m.raw_fields['DATE FILED'] ||
-        m.raw_fields['DATE OF FILING OF CP APPLICATION'] ||
-        m.raw_fields['DATE OF APPLICATION'] ||
-        m.raw_fields['DATE APPLIED']
-      )) || null,
+      raw.year_applied,
+      raw.yearApplied,
+      raw.YEAR,
+      raw['YEAR APPLIED'],
+      raw.date_filed,
+      raw.date_of_filing_of_cp_application,
+      raw.date_of_application,
+      raw.dateFiled,
+      raw['DATE FILED'],
+      raw['DATE OF FILING OF CP APPLICATION'],
+      raw['DATE OF APPLICATION'],
+      raw['DATE APPLIED'],
+      rawNested.year_applied,
+      rawNested.yearApplied,
+      rawNested.YEAR,
+      rawNested['YEAR APPLIED'],
+      rawNested.date_filed,
+      rawNested.date_of_filing_of_cp_application,
+      rawNested.date_of_application,
+      rawNested.dateFiled,
+      rawNested['DATE FILED'],
+      rawNested['DATE OF FILING OF CP APPLICATION'],
+      rawNested['DATE OF APPLICATION'],
+      rawNested['DATE APPLIED'],
     ];
 
     // Include any raw_fields key that looks like a filing/application date.
     try {
-      if (m.raw_fields && typeof m.raw_fields === 'object') {
-        Object.keys(m.raw_fields).forEach((k) => {
+      const scanObjects = [raw, rawNested];
+      scanObjects.forEach((obj) => {
+        if (!obj || typeof obj !== 'object') return;
+        Object.keys(obj).forEach((k) => {
           const key = String(k || '').toLowerCase();
           if (key.includes('date') && (key.includes('fil') || key.includes('application') || key.includes('applied'))) {
-            candidates.push(m.raw_fields[k]);
+            candidates.push(obj[k]);
           }
         });
-      }
+      });
     } catch (e) {
       // ignore
     }
@@ -1267,59 +1288,6 @@ function Dashboard({
     });
     return rows;
   };
-
-  const getAuthoritativePendingYearRows = React.useCallback(() => {
-    const makeRow = (year, values = {}) => {
-      const base = {
-        year: String(year),
-        CAR: 0,
-        I: 0,
-        II: 0,
-        III: 0,
-        IVA: 0,
-        IVB: 0,
-        V: 0,
-        'VI/VII': 0,
-        IX: 0,
-        X: 0,
-        XI: 0,
-        XII: 0,
-        XIII: 0,
-      };
-      const row = { ...base, ...values };
-      row.TOTAL = row.CAR + row.I + row.II + row.III + row.IVA + row.IVB + row.V + row['VI/VII'] + row.IX + row.X + row.XI + row.XII + row.XIII;
-      return row;
-    };
-
-    const overrides = {
-      2003: { IVB: 1 },
-      2007: { 'VI/VII': 1, X: 1, XI: 1 },
-      2008: { XII: 2 },
-      2009: { 'VI/VII': 1 },
-      2010: { CAR: 2, I: 3, X: 4, XI: 1, XII: 1 },
-      2011: { I: 7, IVB: 3, 'VI/VII': 2, IX: 2, X: 3, XI: 1 },
-      2012: { I: 2, IVB: 5, 'VI/VII': 1, XI: 1 },
-      2013: { I: 1, IVB: 5, IX: 1, XII: 2 },
-      2014: { CAR: 1, I: 3, IVB: 7, XI: 2 },
-      2015: { CAR: 1, I: 9, IVB: 15, X: 6, XI: 1 },
-      2016: { CAR: 2, I: 7, III: 2, IVB: 4, IX: 1, X: 11 },
-      2017: { CAR: 1, I: 6, IVB: 13, IX: 5, X: 7 },
-      2018: { CAR: 7, I: 8, III: 21, IVA: 1, IVB: 20, IX: 2, X: 9, XI: 2, XII: 1 },
-      2019: { CAR: 3, I: 8, II: 3, IVB: 52, 'VI/VII': 1, IX: 9, X: 1, XI: 1 },
-      2020: { CAR: 2, I: 7, II: 4, III: 1, IVA: 2, IVB: 37, IX: 5, XII: 4 },
-      2021: { CAR: 5, I: 1, II: 2, III: 13, IVA: 7, IVB: 37, IX: 68, XI: 82, XII: 7 },
-      2022: { CAR: 6, I: 8, II: 3, III: 6, IVA: 3, IVB: 23, 'VI/VII': 3, IX: 27, XI: 92, XII: 15 },
-      2023: { CAR: 4, I: 10, II: 5, III: 3, IVA: 3, V: 3, 'VI/VII': 3, IX: 37, XI: 322, XII: 5 },
-      2024: { CAR: 20, I: 1, II: 22, III: 17, IVA: 3, V: 4, 'VI/VII': 4, IX: 28, X: 15, XI: 805, XII: 6, XIII: 151 },
-      2025: { CAR: 10, II: 2, III: 30, IVB: 2, V: 1, 'VI/VII': 6, IX: 1, X: 15, XI: 615, XIII: 24 },
-    };
-
-    const rows = [];
-    for (let y = PENDING_YEAR_MIN; y <= PENDING_YEAR_MAX; y += 1) {
-      rows.push(makeRow(y, overrides[y] || {}));
-    }
-    return rows;
-  }, []);
 
   // Compute counts by project type for 'Summary per project'
   // Categories match the Excel file: "Summary per project" sheet columns
@@ -1652,76 +1620,6 @@ function Dashboard({
       totals.cebDeliberation += Number(r.cebDeliberation || 0);
     });
 
-    // For the approved CP ongoing baseline import, align the summary total row
-    // to the official Excel summary values so the dashboard matches the source file.
-    try {
-      const sc = String(selectedCollection || '').toLowerCase();
-      const isApprovedBaseline = sc.includes('approved_cps_ongoing') || sc.includes('approved cps');
-      if (isApprovedBaseline) {
-        return {
-          ...totals,
-          total: 180,
-          issuanceOfWorkOrder: 158,
-          preFBIConference: 156,
-          conductOfFBI: 143,
-          reviewOfFBIReport: 139,
-          preFPICConference: 124,
-          firstCommunityAssembly: 104,
-          secondCommunityAssembly: 104,
-          consensusBuildingDecision: 100,
-          moaValidationRatificationSigning: 83,
-          issuanceResolutionOfConsent: 82,
-          reviewByRRT: 67,
-          reviewByADOorLAO: 52,
-          forComplianceOfFPICTeam: 75,
-          cebDeliberation: 7,
-        };
-      }
-
-      // Fallback: if computed totals match the known incorrect signature currently
-      // observed in production, coerce to the validated Excel totals.
-      const wrongSignature = (
-        Number(totals.total || 0) === 186 &&
-        Number(totals.issuanceOfWorkOrder || 0) === 158 &&
-        Number(totals.preFBIConference || 0) === 156 &&
-        Number(totals.conductOfFBI || 0) === 147 &&
-         Number(totals.reviewOfFBIReport || 0) === 138 &&
-        Number(totals.preFPICConference || 0) === 124 &&
-        Number(totals.firstCommunityAssembly || 0) === 109 &&
-        Number(totals.secondCommunityAssembly || 0) === 108 &&
-        Number(totals.consensusBuildingDecision || 0) === 95 &&
-        Number(totals.moaValidationRatificationSigning || 0) === 86 &&
-        Number(totals.issuanceResolutionOfConsent || 0) === 83 &&
-        Number(totals.reviewByRRT || 0) === 68 &&
-        Number(totals.reviewByADOorLAO || 0) === 55 &&
-        Number(totals.forComplianceOfFPICTeam || 0) === 39 &&
-        Number(totals.cebDeliberation || 0) === 7
-      );
-
-      if (wrongSignature) {
-        return {
-          ...totals,
-          total: 180,
-          issuanceOfWorkOrder: 158,
-          preFBIConference: 156,
-          conductOfFBI: 143,
-          reviewOfFBIReport: 139,
-          preFPICConference: 124,
-          firstCommunityAssembly: 104,
-          secondCommunityAssembly: 104,
-          consensusBuildingDecision: 100,
-          moaValidationRatificationSigning: 83,
-          issuanceResolutionOfConsent: 82,
-          reviewByRRT: 67,
-          reviewByADOorLAO: 52,
-          forComplianceOfFPICTeam: 75,
-          cebDeliberation: 7,
-        };
-      }
-    } catch (e) {
-      // ignore
-    }
-
     return totals;
   }, [ongoingSummaryRows, selectedCollection]);
 
@@ -1769,6 +1667,32 @@ function Dashboard({
 
     // If tab is unfiltered global view, return prefiltered list
     if (unfilteredTabs.includes(id)) return prefiltered;
+
+    const getPendingBucketStrict = (rec) => {
+      const explicitRegion =
+        rec?.region ||
+        rec?.raw_fields?.REGION ||
+        rec?.raw_fields?.Region ||
+        rec?.raw_fields?.region ||
+        deriveRawRegion(rec) ||
+        '';
+
+      const explicitBucket =
+        toPendingRegionBucket(detectRegionSheet(explicitRegion)) ||
+        toPendingRegionBucket(canonicalRegion(explicitRegion)) ||
+        toPendingRegionBucket(explicitRegion);
+
+      if (explicitBucket) return explicitBucket;
+
+      // Use province fallback only when explicit region is missing.
+      const provinceFallback = rec?.province || rec?.raw_fields?.PROVINCE || rec?.raw_fields?.Province || rec?.raw_fields?.province || '';
+      return (
+        toPendingRegionBucket(detectRegionSheet(provinceFallback)) ||
+        toPendingRegionBucket(canonicalRegion(provinceFallback)) ||
+        toPendingRegionBucket(provinceFallback) ||
+        ''
+      );
+    };
 
     // Handle CAR explicitly
     if (id === 'car') {
@@ -2716,6 +2640,31 @@ function Dashboard({
       return candidates.some((value) => normalizeSearch(value).includes(query));
     });
 
+    const getPendingBucketStrict = (rec) => {
+      const explicitRegion =
+        rec?.region ||
+        rec?.raw_fields?.REGION ||
+        rec?.raw_fields?.Region ||
+        rec?.raw_fields?.region ||
+        deriveRawRegion(rec) ||
+        '';
+
+      const explicitBucket =
+        toPendingRegionBucket(detectRegionSheet(explicitRegion)) ||
+        toPendingRegionBucket(canonicalRegion(explicitRegion)) ||
+        toPendingRegionBucket(explicitRegion);
+
+      if (explicitBucket) return explicitBucket;
+
+      const provinceFallback = rec?.province || rec?.raw_fields?.PROVINCE || rec?.raw_fields?.Province || rec?.raw_fields?.province || '';
+      return (
+        toPendingRegionBucket(detectRegionSheet(provinceFallback)) ||
+        toPendingRegionBucket(canonicalRegion(provinceFallback)) ||
+        toPendingRegionBucket(provinceFallback) ||
+        ''
+      );
+    };
+
     console.log('🔍 Pending Tab - After search filter:', prefiltered.length);
     if (query && prefiltered.length > 0) {
       console.log('🔍 Pending Tab - Sample match:', {
@@ -2744,9 +2693,8 @@ function Dashboard({
     // Combined Region 6/7
     if (id === 'region6-7') {
       return prefiltered.filter((rec) => {
-        const candidate = deriveRawRegion(rec) || rec.region || '';
-        const d = detectRegionSheet(candidate);
-        return d === 'Region VI' || d === 'Region VII';
+        const bucket = getPendingBucketStrict(rec);
+        return bucket === 'VI/VII';
       });
     }
 
@@ -2779,13 +2727,7 @@ function Dashboard({
       };
       const targetBucket = targetBucketByRegion[target] || '';
       return prefiltered.filter((rec) => {
-        const candidate = deriveRawRegion(rec) || rec.region || '';
-        const detected = detectRegionSheet(candidate);
-        const bucket =
-          toPendingRegionBucket(detected) ||
-          toPendingRegionBucket(canonicalRegion(candidate)) ||
-          toPendingRegionBucket(candidate) ||
-          toPendingRegionBucket(rec?.province || rec?.raw_fields?.PROVINCE || rec?.raw_fields?.Province || '');
+        const bucket = getPendingBucketStrict(rec);
         if (targetBucket && bucket === targetBucket) return true;
         return false;
       });
@@ -2843,87 +2785,7 @@ function Dashboard({
   const pendingYearSummaryRows = computeYearSummaryRows(filteredPendingRecords || []);
 
   const { categories: pendingProjectCategories, countsByRegion: pendingProjectCountsByRegion, totals: pendingProjectCounts } = computePendingProjectTypeSummaryRows(filteredPendingRecords || []);
-  const pendingYearSummaryRowsDisplay = React.useMemo(() => {
-    const baseRows = (getAuthoritativePendingYearRows() || []).map((r) => ({ ...r }));
-    const byYear = new Map(baseRows.map((r) => [String(r.year), r]));
-
-    const ensureRow = (year) => {
-      const y = String(year || 'Unknown');
-      if (!byYear.has(y)) {
-        const row = {
-          year: y,
-          CAR: 0,
-          I: 0,
-          II: 0,
-          III: 0,
-          IVA: 0,
-          IVB: 0,
-          V: 0,
-          'VI/VII': 0,
-          IX: 0,
-          X: 0,
-          XI: 0,
-          XII: 0,
-          XIII: 0,
-          TOTAL: 0,
-        };
-        byYear.set(y, row);
-        baseRows.push(row);
-      }
-      return byYear.get(y);
-    };
-
-    (filteredPendingRecords || []).forEach((m) => {
-      // Imported workbook rows already accounted for by authoritative overrides.
-      // Add only manual rows so Summary increases when users add new pending entries.
-      const hasSourceSheet = Boolean(m?.source_sheet || m?.raw_fields?.source_sheet);
-      if (hasSourceSheet) return;
-
-      const year = getYearFromMapping(m) || 'Unknown';
-      if (String(year) === 'Unknown') return;
-
-      const row = ensureRow(year);
-      const candidate =
-        deriveRawRegion(m) ||
-        m?.region ||
-        m?.province ||
-        m?.raw_fields?.REGION ||
-        m?.raw_fields?.Region ||
-        m?.raw_fields?.region ||
-        m?.raw_fields?.PROVINCE ||
-        m?.raw_fields?.Province ||
-        m?.raw_fields?.province ||
-        '';
-
-      const bucket =
-        toPendingRegionBucket(detectRegionSheet(candidate)) ||
-        toPendingRegionBucket(canonicalRegion(candidate)) ||
-        toPendingRegionBucket(candidate);
-
-      if (bucket && Object.prototype.hasOwnProperty.call(row, bucket)) {
-        row[bucket] = Number(row[bucket] || 0) + 1;
-      }
-    });
-
-    baseRows.forEach((r) => {
-      r.TOTAL =
-        Number(r.CAR || 0) +
-        Number(r.I || 0) +
-        Number(r.II || 0) +
-        Number(r.III || 0) +
-        Number(r.IVA || 0) +
-        Number(r.IVB || 0) +
-        Number(r.V || 0) +
-        Number(r['VI/VII'] || 0) +
-        Number(r.IX || 0) +
-        Number(r.X || 0) +
-        Number(r.XI || 0) +
-        Number(r.XII || 0) +
-        Number(r.XIII || 0);
-    });
-
-    return baseRows.sort((a, b) => Number(a.year || 0) - Number(b.year || 0));
-  }, [getAuthoritativePendingYearRows, filteredPendingRecords]);
+  const pendingYearSummaryRowsDisplay = pendingYearSummaryRows;
 
   const pendingProjectSummaryDisplay = React.useMemo(() => {
     return {
