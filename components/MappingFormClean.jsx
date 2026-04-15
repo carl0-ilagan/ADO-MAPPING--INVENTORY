@@ -253,9 +253,10 @@ export default function MappingForm({
   ongoingMode = false,
   pendingMode = false,
   fixedRegion = null,
-  formTitle = "Add New Mapping",
-  submitLabel = "Save Mapping",
+  formTitle = "Add New Record",
+  submitLabel = "Save Record",
 }) {
+  const isEditing = Boolean(initialData && initialData.id);
   const isInventoryUser = (user?.email || '').toLowerCase() === 'ncip@inventory.gov.ph';
   const [regions, setRegions] = useState([]);
   const [provincesAll, setProvincesAll] = useState([]);
@@ -289,6 +290,7 @@ export default function MappingForm({
   const [pendingAffectedAdIccIp, setPendingAffectedAdIccIp] = useState("");
   const [pendingStatusOfApplication, setPendingStatusOfApplication] = useState("");
   const [pendingStatus, setPendingStatus] = useState("");
+  const [pendingMoveStatus, setPendingMoveStatus] = useState("");
   // Ongoing-mode specific fields
   const ONGOING_LABELS = [
     'Name of Proponent',
@@ -559,15 +561,27 @@ export default function MappingForm({
     // Hydrate pending-mode fields if available in raw_fields
     try {
       const rf = (initialData && typeof initialData === 'object' && initialData.raw_fields && typeof initialData.raw_fields === 'object') ? initialData.raw_fields : {};
-      setPendingNo(rf.no || rf.NO || rf['No'] || rf['NO'] || '');
-      setPendingRegionField(rf.region || rf.REGION || rf['Region'] || '');
-      setPendingDateOfFiling(rf.date_of_filing_of_cp_application || rf['DATE OF FILING OF CP APPLICATION'] || rf.date_of_filing || rf.date || '');
-      setPendingProponent(rf.name_of_proponent || rf['NAME OF PROPONENT'] || rf.proponent || rf.applicant || '');
-      setPendingProjectNameField(rf.name_of_project || rf['NAME OF PROJECT'] || rf.projectName || rf.project_name || '');
-      setPendingProjectCost(rf.project_cost || rf['Project Cost'] || rf.project_cost || '');
+      setPendingNo(
+        rf.no || rf.NO || rf['No'] || rf['NO'] ||
+        initialData.worksheetNo || initialData.worksheet_no || initialData.surveyNumber || initialData.controlNumber || ''
+      );
+      setPendingRegionField(rf.region || rf.REGION || rf['Region'] || initialData.region || '');
+      setPendingDateOfFiling(
+        rf.date_of_filing_of_cp_application || rf['DATE OF FILING OF CP APPLICATION'] || rf.date_of_filing || rf.date ||
+        initialData.dateOfApplication || initialData.date_filed || ''
+      );
+      setPendingProponent(
+        rf.name_of_proponent || rf['NAME OF PROPONENT'] || rf.proponent || rf.applicant ||
+        initialData.proponent || initialData.applicantProponent || initialData.applicant || ''
+      );
+      setPendingProjectNameField(
+        rf.name_of_project || rf['NAME OF PROJECT'] || rf.projectName || rf.project_name ||
+        initialData.nameOfProject || initialData.projectName || initialData.project_name || ''
+      );
+      setPendingProjectCost(rf.project_cost || rf['Project Cost'] || initialData.projectCost || initialData.project_cost || '');
       // reuse `location` state for location
       setLocation(initialData.location || rf.location || rf.LOCATION || '');
-      setPendingTypeOfProject(rf.type_of_project || rf['Type of Project'] || '');
+      setPendingTypeOfProject(rf.type_of_project || rf['Type of Project'] || initialData.typeOfProject || initialData.natureOfProject || '');
       // Hydrate combined affected/FPIC field. Accept either a combined raw key
       // or separate parts and join them if present.
       const combinedKey = Object.keys(rf || {}).find((k) => String(k).trim().toUpperCase() === 'AFFECTED AD/ICC/IP\t(FOR CP WITH ONGOING FPIC)');
@@ -579,8 +593,16 @@ export default function MappingForm({
         const joined = `${partA || ''}${partA && partB ? ' ' : ''}${partB || ''}`.trim();
         setPendingAffectedAdIccIp(joined);
       }
-      setPendingStatusOfApplication(rf.status_of_application || rf['STATUS OF APPLICATION'] || '');
-      setPendingStatus(rf.status || rf['STATUS'] || '');
+      setPendingStatusOfApplication(rf.status_of_application || rf['STATUS OF APPLICATION'] || initialData.statusOfApplication || initialData.remarks || '');
+      setPendingStatus(rf.status || rf['STATUS'] || initialData.status || initialData.workflowStatus || initialData.cadtStatus || '');
+      const statusSource = String(initialData.status || initialData.workflowStatus || initialData.cadtStatus || rf.status || rf['STATUS'] || '').toLowerCase();
+      if (statusSource.includes('ongoing') || statusSource.includes('on process') || statusSource.includes('processing')) {
+        setPendingMoveStatus('Ongoing');
+      } else if (statusSource.includes('approved') || statusSource.includes('approve')) {
+        setPendingMoveStatus('Approved');
+      } else {
+        setPendingMoveStatus('');
+      }
     } catch (e) {
       // ignore
     }
@@ -729,6 +751,14 @@ export default function MappingForm({
     // If this is a pending-mode submission, assemble raw fields and submit directly
     if (pendingMode) {
       try {
+        const targetStatus = (() => {
+          if (!isEditing) return 'Pending';
+          const s = String(pendingMoveStatus || '').trim().toLowerCase();
+          if (s.includes('ongoing') || s.includes('on process') || s.includes('processing')) return 'Ongoing';
+          if (s.includes('approved') || s.includes('approve')) return 'Approved';
+          return 'Pending';
+        })();
+
         const raw = {
           'NO': (pendingNo || '').trim(),
           'REGION': (pendingRegionField || '').trim(),
@@ -742,7 +772,7 @@ export default function MappingForm({
           // layout. Use a tab between the two parts to match the import header string.
           ['AFFECTED AD/ICC/IP\t(for CP with ongoing FPIC)']: (pendingAffectedAdIccIp || '').trim(),
           'STATUS OF APPLICATION': (pendingStatusOfApplication || '').trim(),
-          'STATUS': (pendingStatus || '').trim(),
+          'STATUS': isEditing ? targetStatus : ((pendingStatus || '').trim() || 'Pending'),
         };
 
         await onSubmit({
@@ -755,13 +785,16 @@ export default function MappingForm({
           remarks: (pendingStatusOfApplication || '').trim(),
           location: (location || '').trim(),
           surveyNumber: (pendingNo || '').trim(),
-          status: 'Pending',
-          _pending: true
+          status: targetStatus,
+          workflowStatus: targetStatus,
+          cadtStatus: targetStatus,
+          _pending: targetStatus === 'Pending',
+          _ongoing: targetStatus === 'Ongoing'
         });
 
         if (!isModal) {
           setAlertTick((t) => t + 1);
-          setAlert({ type: "success", message: "Pending mapping saved." });
+          setAlert({ type: "success", message: "Pending record saved." });
         }
 
         // Reset pending fields
@@ -776,13 +809,14 @@ export default function MappingForm({
         // cleared along with the combined field
         setPendingStatusOfApplication("");
         setPendingStatus("");
+        setPendingMoveStatus("");
 
         setIsSaving(false);
         return;
       } catch (err) {
         if (!isModal) {
           setAlertTick((t) => t + 1);
-          setAlert({ type: "error", message: err?.message || "Failed to save pending mapping." });
+          setAlert({ type: "error", message: err?.message || "Failed to save pending record." });
         }
         setIsSaving(false);
         return;
@@ -853,7 +887,7 @@ export default function MappingForm({
 
       if (!isModal) {
         setAlertTick((t) => t + 1);
-        setAlert({ type: "success", message: "Mapping saved successfully." });
+        setAlert({ type: "success", message: "Record saved successfully." });
       }
 
       // Reset form
@@ -882,7 +916,7 @@ export default function MappingForm({
     } catch (error) {
       if (!isModal) {
         setAlertTick((t) => t + 1);
-        setAlert({ type: "error", message: error?.message || "Failed to save mapping." });
+        setAlert({ type: "error", message: error?.message || "Failed to save record." });
       }
     } finally {
       setIsSaving(false);
@@ -927,7 +961,7 @@ export default function MappingForm({
             <div className="flex items-center justify-between">
               <div>
                 <h1 className="font-bold text-xl text-[#0A2D55]">{formTitle}</h1>
-                <p className="text-sm text-[#0A2D55]/55 mt-1">Indigenous Cultural Community mapping record</p>
+                <p className="text-sm text-[#0A2D55]/55 mt-1">Indigenous Cultural Community record</p>
               </div>
 
             </div>
@@ -1039,7 +1073,22 @@ export default function MappingForm({
                         </div>
                         <div>
                           <label className="block font-semibold text-[#0A2D55] mb-2">STATUS</label>
-                          <input value={pendingStatus} onChange={(e) => setPendingStatus(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
+                          {isEditing ? (
+                            <>
+                              <select
+                                value={pendingMoveStatus}
+                                onChange={(e) => setPendingMoveStatus(e.target.value)}
+                                className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition"
+                              >
+                                <option value="">Keep as Pending</option>
+                                <option value="Ongoing">Ongoing</option>
+                                <option value="Approved">Approved</option>
+                              </select>
+                              <p className="text-xs text-[#0A2D55]/60 mt-1">From Pending, you can move this record to Ongoing or Approved.</p>
+                            </>
+                          ) : (
+                            <input value={pendingStatus} onChange={(e) => setPendingStatus(e.target.value)} className="w-full px-4 py-3 border-2 border-[#0A2D55]/10 rounded-xl bg-white/80 hover:border-[#F2C94C]/40 focus:outline-none focus:ring-2 focus:ring-[#F2C94C]/40 transition" />
+                          )}
                         </div>
                       </div>
                     </>

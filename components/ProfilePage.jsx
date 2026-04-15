@@ -274,7 +274,7 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
   };
 
   const handleOpenExportModal = () => {
-    const defaultName = `mappings-${new Date().toISOString().split('T')[0]}.xlsx`;
+    const defaultName = `records-${new Date().toISOString().split('T')[0]}.xlsx`;
     setExportFileName(defaultName);
     setExportError('');
     setShowExportModal(true);
@@ -291,7 +291,7 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
 
   const handleConfirmExport = async () => {
     const wb = buildExportWorkbook();
-    const safeName = (exportFileName || 'mappings.xlsx').replace(/\s+/g, ' ').trim();
+    const safeName = (exportFileName || 'records.xlsx').replace(/\s+/g, ' ').trim();
     const fileName = safeName.endsWith('.xlsx') ? safeName : `${safeName}.xlsx`;
     setIsExporting(true);
 
@@ -822,7 +822,7 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
               ? "opacity-100 bottom-0 right-20"
               : "opacity-0 bottom-0 right-0 pointer-events-none"
           )}
-          title="Add Mapping"
+          title="Add Record"
         >
           <Plus size={24} strokeWidth={2.5} />
         </button>
@@ -921,7 +921,7 @@ export function ProfilePage({ user, onBack, onLogout, onAddMapping, mappings = [
                     onChange={(e) => setExportFileName(e.target.value)}
                     disabled={isExporting}
                     className="w-full px-4 py-2.5 rounded-xl border border-white/20 bg-white/10 text-white placeholder-white/60 focus:ring-2 focus:ring-[#F2C94C]/40 focus:border-transparent transition"
-                    placeholder="mappings.xlsx"
+                    placeholder="records.xlsx"
                   />
                 </div>
                 {exportError && (

@@ -104,7 +104,9 @@ export function App() {
     return {
       id: p.id,
       surveyNumber: pick('control_number', 'survey_number', 'worksheet_no', 'NO', 'No', 'no') || '',
+      controlNumber: pick('control_number', 'survey_number', 'worksheet_no', 'NO', 'No', 'no') || '',
       proponent: pick('proponent', 'applicantProponent', 'applicant', 'NAME OF PROPONENT', 'Name of Proponent', 'name_of_proponent') || '',
+      applicantProponent: pick('proponent', 'applicantProponent', 'applicant', 'NAME OF PROPONENT', 'Name of Proponent', 'name_of_proponent') || '',
       applicant: pick('proponent', 'applicantProponent', 'applicant', 'NAME OF PROPONENT', 'Name of Proponent', 'name_of_proponent') || '',
       nameOfProject: pick('project_name', 'nameOfProject', 'projectName', 'NAME OF PROJECT', 'Name of Project', 'name_of_project') || '',
       projectName: pick('project_name', 'nameOfProject', 'projectName', 'NAME OF PROJECT', 'Name of Project', 'name_of_project') || '',
@@ -403,6 +405,18 @@ export function App() {
     if (!currentUser) return;
 
     try {
+      const deriveCanonicalStatus = (...values) => {
+        for (const v of values) {
+          if (v === null || typeof v === 'undefined') continue;
+          const text = String(v).trim().toLowerCase();
+          if (!text) continue;
+          if (text.includes('approved') || text.includes('approve')) return 'Approved';
+          if (text.includes('ongoing') || text.includes('on process') || text.includes('processing') || text.includes('in progress')) return 'Ongoing';
+          if (text.includes('pend')) return 'Pending';
+        }
+        return '';
+      };
+
       const municipalities = formData.municipalities || [];
       const barangays = formData.barangays || [];
 
@@ -448,6 +462,31 @@ export function App() {
         (addMappingContext && addMappingContext.pending) ||
         String(selectedCollection || '').toLowerCase().includes('pending')
       );
+
+      // Canonical status/flags for cp_projects edits/import-like records.
+      // This ensures tab movement is correct after editing (e.g. Pending -> Ongoing).
+      const explicitStatus =
+        // Prefer explicit values coming from the submitted form/edit action.
+        deriveCanonicalStatus(
+          formData?.status,
+          formData?.workflowStatus,
+          formData?.cadtStatus,
+          formData?.ongoing?.status
+        ) ||
+        // Fallback to descriptive fields only if explicit status is absent.
+        deriveCanonicalStatus(
+          formData?.remarks,
+          formData?.ongoing?.remarks,
+          editingMapping?.status,
+          editingMapping?.workflowStatus,
+          editingMapping?.cadtStatus
+        );
+
+      if (explicitStatus) {
+        newMapping.status = explicitStatus;
+        newMapping._pending = explicitStatus === 'Pending';
+        newMapping._ongoing = explicitStatus === 'Ongoing';
+      }
 
 
       // Debug: show the final mapping object that will be saved/updated
@@ -526,13 +565,13 @@ export function App() {
       }
 
       setToastTick((t) => t + 1);
-      setToast({ type: 'success', message: editingMapping ? 'Mapping updated successfully.' : 'Mapping saved successfully.' });
+      setToast({ type: 'success', message: editingMapping ? 'Record updated successfully.' : 'Record saved successfully.' });
       setShowAddMappingModal(false);
       setEditingMapping(null);
     } catch (error) {
       console.error('Error adding mapping:', error);
       setToastTick((t) => t + 1);
-      setToast({ type: 'error', message: error?.message || 'Failed to save mapping.' });
+      setToast({ type: 'error', message: error?.message || 'Failed to save record.' });
       throw error;
     }
   };
@@ -694,7 +733,9 @@ export function App() {
         const mappingsFormat = cpProjects.map(p => ({
           id: p.id,
           surveyNumber: p.control_number || p.survey_number || '',
+          controlNumber: p.control_number || p.survey_number || p.worksheet_no || '',
           proponent: p.proponent || '',
+          applicantProponent: p.proponent || '',
           applicant: p.proponent || '',
           nameOfProject: p.project_name || '',
           projectName: p.project_name || '',
@@ -766,7 +807,9 @@ export function App() {
           const mappingsFormat = freshProjects.map(p => ({
             id: p.id,
             surveyNumber: p.control_number || p.survey_number || '',
+            controlNumber: p.control_number || p.survey_number || p.worksheet_no || '',
             proponent: p.proponent || '',
+            applicantProponent: p.proponent || '',
             applicant: p.proponent || '',
             nameOfProject: p.project_name || '',
             projectName: p.project_name || '',
@@ -1065,7 +1108,7 @@ export function App() {
             setAddMappingContext(null);
           }
         }}
-        title={editingMapping ? "Edit Mapping" : "Add New Mapping"}
+        title={editingMapping ? "Edit Record" : "Add New Record"}
         dismissOnSecondaryClick={true}
         primaryChildren={
             <MappingForm
@@ -1077,18 +1120,30 @@ export function App() {
               // Enable ongoingMode when either opening from the Ongoing tab or when editing an ongoing mapping
               ongoingMode={Boolean(
                 (addMappingContext && addMappingContext.ongoing) ||
-                (editingMapping && (editingMapping._ongoing === true || String(editingMapping.importCollection || '').toLowerCase().includes('ongoing')))
+                (editingMapping && (
+                  editingMapping._ongoing === true ||
+                  /ongoing|on process|processing/i.test(String(editingMapping.status || editingMapping.workflowStatus || editingMapping.cadtStatus || '')) ||
+                  String(editingMapping.importCollection || '').toLowerCase().includes('ongoing')
+                ))
               )}
               // Enable pendingMode when opening from the Pending tab or when the
               // currently selected collection appears to be a pending import.
-              pendingMode={Boolean((addMappingContext && addMappingContext.pending) || String(selectedCollection || '').toLowerCase().includes('pending'))}
+              pendingMode={Boolean(
+                (addMappingContext && addMappingContext.pending) ||
+                (editingMapping && (
+                  editingMapping._pending === true ||
+                  /pend/i.test(String(editingMapping.status || editingMapping.workflowStatus || editingMapping.cadtStatus || '')) ||
+                  String(editingMapping.importCollection || '').toLowerCase().includes('pending')
+                )) ||
+                String(selectedCollection || '').toLowerCase().includes('pending')
+              )}
               // Lock region when opened from a region subtab or when editing a mapping (use mapping.region)
               fixedRegion={
                 (editingMapping && (editingMapping.region || null)) ||
                 (addMappingContext && addMappingContext.region ? addMappingContext.region : null)
               }
-              formTitle={editingMapping ? "Edit Mapping" : "Add New Mapping"}
-              submitLabel={editingMapping ? "Update Mapping" : "Save Mapping"}
+              formTitle={editingMapping ? "Edit Record" : "Add New Record"}
+              submitLabel={editingMapping ? "Update Record" : "Save Record"}
             />
         }
       />

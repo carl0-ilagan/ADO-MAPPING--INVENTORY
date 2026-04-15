@@ -182,6 +182,36 @@ function Dashboard({
     }
   };
 
+  const getStatusBlob = (m) => {
+    const rf = m?.raw_fields || {};
+    return String([
+      m?.status,
+      m?.statusText,
+      m?.workflowStatus,
+      m?.workflow_status,
+      m?.cadtStatus,
+      m?.cadt_status,
+      rf?.status,
+      rf?.statusText,
+      rf?.workflow_status,
+      rf?.workflowStatus,
+      rf?.STATUS,
+      rf?.Status,
+      rf?.status_of_application,
+      rf?.['STATUS OF APPLICATION'],
+    ].filter((v) => v !== null && typeof v !== 'undefined').join(' | ')).toLowerCase();
+  };
+
+  const isExplicitlyOngoingOrApproved = (m) => {
+    const s = getStatusBlob(m);
+    return s.includes('ongoing') || s.includes('on process') || s.includes('processing') || s.includes('approved') || s.includes('complete') || s.includes('done');
+  };
+
+  const isExplicitlyOngoing = (m) => {
+    const s = getStatusBlob(m);
+    return s.includes('ongoing') || s.includes('on process') || s.includes('processing');
+  };
+
   const detectRegionSheet = (regionValue) => {
     const value = String(regionValue || '').toUpperCase();
     if (!value) return null;
@@ -1032,7 +1062,23 @@ function Dashboard({
     const ONGOING_REGION_ORDER = ['CAR','1','2','3','4A','4B','5','6&7','7','8','9','10','11','12','13'];
     const ongoingRegionSortKey = (r) => { const i = ONGOING_REGION_ORDER.indexOf(r); return i >= 0 ? i : 99; };
     const rows = Array.from(regionMap.values()).sort((a, b) => ongoingRegionSortKey(a.region) - ongoingRegionSortKey(b.region));
-    try { console.debug('Dashboard: computeSummaryRows ->', { inputCount: records.length, rows }); } catch (e) { /* ignore */ }
+    
+    // Debug: show how many records are in each group
+    try {
+      const unknownCount = regionMap.get('Unknown')?.total || 0;
+      if (unknownCount > 0) {
+        const unknownRecords = records.filter((m) => {
+          let rawRegion = '';
+          if (m?.region) rawRegion = m.region;
+          else if (m?.ongoing?.region) rawRegion = m.ongoing.region;
+          else if (m?.raw_fields?.region) rawRegion = m.raw_fields.region;
+          else if (m?.raw_fields?.sheet) rawRegion = m.raw_fields.sheet;
+          return !rawRegion || String(rawRegion).trim() === '';
+        });
+        console.debug('Dashboard: computeSummaryRows Unknown group ->', { unknownCount, sampleRecords: unknownRecords.slice(0, 3).map((m) => ({ survey: m.surveyNumber, project: m.nameOfProject, region: m.region, sheet: m?.raw_fields?.sheet })) });
+      }
+      console.debug('Dashboard: computeSummaryRows ->', { inputCount: records.length, rows });
+    } catch (e) { /* ignore */ }
     return rows;
   };
 
@@ -1450,7 +1496,32 @@ function Dashboard({
     if (m._ongoing === true || String(m._ongoing || '').toLowerCase() === 'true') return true;
     // import collection marker
     if (String(m.importCollection || '').toLowerCase().includes('ongoing')) return true;
-    // optionally treat status keywords as ongoing (disabled by default)
+
+    // Robust status-based fallback: edited records may update textual status
+    // before/without setting _ongoing consistently in legacy collections.
+    const rf = m?.raw_fields || {};
+    const statusBlob = String([
+      m?.status,
+      m?.statusText,
+      m?.workflowStatus,
+      m?.workflow_status,
+      m?.cadtStatus,
+      m?.cadt_status,
+      rf?.status,
+      rf?.statusText,
+      rf?.workflow_status,
+      rf?.workflowStatus,
+      rf?.STATUS,
+      rf?.Status,
+      rf?.status_of_application,
+      rf?.['STATUS OF APPLICATION'],
+    ].filter((v) => v !== null && typeof v !== 'undefined').join(' | ')).toLowerCase();
+
+    if (statusBlob.includes('ongoing') || statusBlob.includes('on process') || statusBlob.includes('for processing') || statusBlob.includes('processing') || statusBlob.includes('in progress')) {
+      return true;
+    }
+
+    // Keep optional legacy switch behavior for older CADT status-only records.
     if (treatStatusAsOngoing) {
       const status = String(m.cadtStatus || m.cadt_status || '').toLowerCase();
       if (status.includes('on process') || status.includes('for processing') || status.includes('processing')) return true;
@@ -1575,7 +1646,7 @@ function Dashboard({
   
   const ongoingRecords = Array.isArray(mappings)
     ? (isSelectedCollectionCPProjects 
-        ? mappings.filter((m) => m._ongoing === true && isProjectLikeRecord(m))
+        ? mappings.filter((m) => (m._ongoing === true || isExplicitlyOngoing(m)) && isProjectLikeRecord(m))
         : isSelectedCollectionOngoing 
         ? mappings.filter((m) => isProjectLikeRecord(m))
         : mappings.filter((m) => isOngoingMapping(m) && isProjectLikeRecord(m)))
@@ -1630,7 +1701,44 @@ function Dashboard({
     const unfilteredTabs = ['summary', 'summary-per-project', 'denied-by-mgb', 'inactive'];
 
     // Apply search / region / remarks filtering first (same rules as main list)
-    const query = String(searchQuery || '').toLowerCase();
+    const normalizeSearch = (value) => String(value || '')
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const tokenVariants = (token) => {
+      const t = String(token || '').trim();
+      if (!t) return [];
+      const variants = new Set([t]);
+      if (t.endsWith('ing') && t.length > 4) variants.add(t.slice(0, -3));
+      if (t.endsWith('ed') && t.length > 3) variants.add(t.slice(0, -2));
+      if (t.endsWith('es') && t.length > 3) variants.add(t.slice(0, -2));
+      if (t.endsWith('s') && t.length > 2) variants.add(t.slice(0, -1));
+      if (t === 'electric') variants.add('electri');
+      if (t === 'pumped') variants.add('pump');
+      return Array.from(variants).filter(Boolean);
+    };
+
+    const matchesLoose = (value, queryNorm) => {
+      const hay = normalizeSearch(value);
+      if (!queryNorm) return true;
+      if (!hay) return false;
+      if (hay.includes(queryNorm)) return true;
+
+      const hayTokens = hay.split(' ').filter(Boolean);
+      const qTokens = queryNorm.split(' ').filter((t) => t.length >= 2);
+      if (qTokens.length === 0) return hay.includes(queryNorm);
+
+      return qTokens.every((qt) => {
+        const variants = tokenVariants(qt);
+        return hayTokens.some((ht) => variants.some((v) => ht.includes(v) || v.includes(ht)));
+      });
+    };
+
+    const query = normalizeSearch(searchQuery);
     console.log('🔍 Ongoing Tab - Search query:', `"${query}"`, 'Records before filter:', ongoingRecords.length);
     
     const prefiltered = ongoingRecords.filter((mapping) => {
@@ -1643,17 +1751,48 @@ function Dashboard({
       if (remarksFilter === 'with' && remarksText === '') return false;
       if (remarksFilter === 'none' && remarksText !== '') return false;
       if (!query) return true;
-      return (
-        String(mapping.surveyNumber || '').toLowerCase().includes(query) ||
-        String(mapping.region || '').toLowerCase().includes(query) ||
-        String(mapping.province || '').toLowerCase().includes(query) ||
-        String(mapping.municipality || '').toLowerCase().includes(query) ||
-        (Array.isArray(mapping.municipalities) && mapping.municipalities.join(', ').toLowerCase().includes(query)) ||
-        (Array.isArray(mapping.barangays) && mapping.barangays.join(', ').toLowerCase().includes(query)) ||
-        (Array.isArray(mapping.icc) && mapping.icc.join(', ').toLowerCase().includes(query)) ||
-        remarksText.toLowerCase().includes(query) ||
-        String(mapping.proponent || mapping.applicant || mapping.applicantProponent || mapping.nameOfProject || mapping.projectName || '').toLowerCase().includes(query)
-      );
+      const rawFields = mapping?.raw_fields || {};
+      const rawSearchText = Object.entries(rawFields)
+        .filter(([k]) => /project|proponent|applicant|location|region|province|municipal|barangay|icc|status|application|survey|control|name/i.test(String(k || '')))
+        .map(([, v]) => (Array.isArray(v) ? v.join(', ') : String(v || '')))
+        .join(' ');
+
+      const rawFieldValuesText = Object.values(rawFields)
+        .flatMap((v) => (Array.isArray(v) ? v : [v]))
+        .map((v) => String(v || '').trim())
+        .filter((v) => v && v !== '-' && v !== '—' && v.toLowerCase() !== 'n/a' && v.toLowerCase() !== 'na')
+        .join(' ');
+
+      const topLevelSearchText = Object.entries(mapping)
+        .filter(([k, v]) => k !== 'raw_fields' && k !== 'ongoing' && v !== null && typeof v !== 'undefined')
+        .map(([, v]) => {
+          if (Array.isArray(v)) return v.join(', ');
+          if (typeof v === 'object') return '';
+          return String(v || '');
+        })
+        .filter(Boolean)
+        .join(' ');
+
+      const candidates = [
+        mapping.surveyNumber,
+        mapping.controlNumber,
+        mapping.region,
+        mapping.province,
+        mapping.municipality,
+        Array.isArray(mapping.municipalities) ? mapping.municipalities.join(', ') : '',
+        Array.isArray(mapping.barangays) ? mapping.barangays.join(', ') : '',
+        Array.isArray(mapping.icc) ? mapping.icc.join(', ') : '',
+        remarksText,
+        mapping.proponent || mapping.applicant || mapping.applicantProponent || '',
+        mapping.nameOfProject || mapping.projectName || mapping.project_name || '',
+        rawSearchText,
+        rawFieldValuesText,
+        topLevelSearchText,
+      ];
+
+      return candidates.some((value) => matchesLoose(value, query));
+    });
+
     console.log('🔍 Ongoing Tab - After search filter:', prefiltered.length);
     if (query && prefiltered.length > 0) {
       console.log('🔍 Ongoing Tab - Sample match:', {
@@ -1662,8 +1801,6 @@ function Dashboard({
         region: prefiltered[0].region
       });
     }
-
-    });
 
     // If tab is unfiltered global view, return prefiltered list
     if (unfilteredTabs.includes(id)) return prefiltered;
@@ -2239,7 +2376,7 @@ function Dashboard({
     { value: 'none', label: 'No Remarks' },
   ]), []);
 
-  console.log('🔍 Approved/Mappings Tab - Total mappings:', mappings.length, 'Search query:', `"${searchQuery}"`);
+  console.log('🔍 Approved/Records Tab - Total records:', mappings.length, 'Search query:', `"${searchQuery}"`);
   
   const filteredMappings = mappings.filter((mapping) => {
     // Special handling for cp_projects unified table
@@ -2307,9 +2444,9 @@ function Dashboard({
     );
   });
 
-  console.log('🔍 Approved/Mappings Tab - Filtered results:', filteredMappings.length);
+  console.log('🔍 Approved/Records Tab - Filtered results:', filteredMappings.length);
   if (searchQuery && filteredMappings.length > 0) {
-    console.log('🔍 Approved/Mappings Tab - Sample match:', {
+    console.log('🔍 Approved/Records Tab - Sample match:', {
       surveyNumber: filteredMappings[0].surveyNumber,
       proponent: filteredMappings[0].proponent || filteredMappings[0].applicant,
       region: filteredMappings[0].region
@@ -2507,6 +2644,7 @@ function Dashboard({
             ).trim();
             const hasLegacyControlNo = /[A-Za-z]/.test(worksheetNo);
             if (!isPendingMapping(m)) return false;
+            if (isExplicitlyOngoingOrApproved(m)) return false;
             if (hasLegacyControlNo) return false;
             if (isSummaryFiller(m)) return false;
             return isProjectLikeRecord(m);
@@ -2564,6 +2702,35 @@ function Dashboard({
       .replace(/[^a-z0-9]+/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
+
+    const tokenVariants = (token) => {
+      const t = String(token || '').trim();
+      if (!t) return [];
+      const variants = new Set([t]);
+      if (t.endsWith('ing') && t.length > 4) variants.add(t.slice(0, -3));
+      if (t.endsWith('ed') && t.length > 3) variants.add(t.slice(0, -2));
+      if (t.endsWith('es') && t.length > 3) variants.add(t.slice(0, -2));
+      if (t.endsWith('s') && t.length > 2) variants.add(t.slice(0, -1));
+      if (t === 'electric') variants.add('electri');
+      if (t === 'pumped') variants.add('pump');
+      return Array.from(variants).filter(Boolean);
+    };
+
+    const matchesLoose = (value, queryNorm) => {
+      const hay = normalizeSearch(value);
+      if (!queryNorm) return true;
+      if (!hay) return false;
+      if (hay.includes(queryNorm)) return true;
+
+      const hayTokens = hay.split(' ').filter(Boolean);
+      const qTokens = queryNorm.split(' ').filter((t) => t.length >= 2);
+      if (qTokens.length === 0) return hay.includes(queryNorm);
+
+      return qTokens.every((qt) => {
+        const variants = tokenVariants(qt);
+        return hayTokens.some((ht) => variants.some((v) => ht.includes(v) || v.includes(ht)));
+      });
+    };
 
     const query = normalizeSearch(searchQuery);
     const prefiltered = pendingRecordsAll.filter((mapping) => {
@@ -2637,7 +2804,7 @@ function Dashboard({
         topLevelSearchText,
       ];
 
-      return candidates.some((value) => normalizeSearch(value).includes(query));
+      return candidates.some((value) => matchesLoose(value, query));
     });
 
     const getPendingBucketStrict = (rec) => {
@@ -2781,10 +2948,15 @@ function Dashboard({
   const pendingEnd = pendingStart + itemsPerPage;
   const paginatedPending = Array.isArray(pendingSortedRecords) ? pendingSortedRecords.slice(pendingStart, pendingEnd) : [];
 
-  const pendingSummaryRows = computeSummaryRows(filteredPendingRecords || []);
-  const pendingYearSummaryRows = computeYearSummaryRows(filteredPendingRecords || []);
+  // For summary tabs, exclude filler records and non-project records to show only actual projects
+  const projectOnlyPendingRecords = React.useMemo(() => {
+    return (filteredPendingRecords || []).filter((m) => !isSummaryFiller(m) && isProjectLikeRecord(m));
+  }, [filteredPendingRecords]);
 
-  const { categories: pendingProjectCategories, countsByRegion: pendingProjectCountsByRegion, totals: pendingProjectCounts } = computePendingProjectTypeSummaryRows(filteredPendingRecords || []);
+  const pendingSummaryRows = computeSummaryRows(projectOnlyPendingRecords);
+  const pendingYearSummaryRows = computeYearSummaryRows(projectOnlyPendingRecords);
+
+  const { categories: pendingProjectCategories, countsByRegion: pendingProjectCountsByRegion, totals: pendingProjectCounts } = computePendingProjectTypeSummaryRows(projectOnlyPendingRecords);
   const pendingYearSummaryRowsDisplay = pendingYearSummaryRows;
 
   const pendingProjectSummaryDisplay = React.useMemo(() => {
@@ -3414,7 +3586,7 @@ function Dashboard({
         }
       }, 600);
       event.target.value = '';
-    }
+    } 
   };
 
   const handleConfirmImport = async (mode = 'add', collectionName = '') => {
@@ -3547,7 +3719,7 @@ function Dashboard({
   };
 
   const handleOpenExportModal = () => {
-    const defaultName = `mappings-${new Date().toISOString().split('T')[0]}.xlsx`;
+    const defaultName = `records-${new Date().toISOString().split('T')[0]}.xlsx`;
     setExportFileName(defaultName);
     setShowExportModal(true);
   };
@@ -3632,7 +3804,7 @@ function Dashboard({
   const handleNoPendingAction = (action) => {
     try {
       setAlertTick((t) => t + 1);
-      setAlert({ type: 'info', message: `No pending mapping to ${action}.` });
+      setAlert({ type: 'info', message: `No pending record to ${action}.` });
     } catch (e) {
       // ignore
     }
@@ -3767,7 +3939,7 @@ function Dashboard({
                 <p className="text-sm mb-2">Click <strong>Import</strong> to add these records into the existing database.</p>
                 <p className="text-xs text-white/70 mb-2">This action appends imported rows and does not overwrite existing records.</p>
 
-
+ 
               </div>
 
               <div className="px-4 sm:px-6 py-3 border-t border-white/15 flex flex-col items-stretch gap-3 bg-white/5">
@@ -3887,7 +4059,7 @@ function Dashboard({
                   {user.username}
                 </h2>
                 <p className="text-xs sm:text-sm text-white/80 mt-1.5 text-balance max-w-xl">
-                  You are logged in as <span className="font-semibold text-[#F2C94C]">{user.role}</span>. Manage Indigenous Cultural Community mappings below.
+                  You are logged in as <span className="font-semibold text-[#F2C94C]">{user.role}</span>. Manage Indigenous Cultural Community records below.
                 </p>
               </div>
 
@@ -4063,7 +4235,7 @@ function Dashboard({
               <div className="bg-white/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-lg shadow-black/10 border border-white/20 p-4 sm:p-6 border-l-4 border-[#0A2D55] hover:shadow-xl hover:border-[#0C3B6E] transition animate-header">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <p className="text-[#0A2D55]/70 text-xs sm:text-sm font-medium truncate">Total Mappings</p>
+                    <p className="text-[#0A2D55]/70 text-xs sm:text-sm font-medium truncate">Total Records</p>
                     <p className="text-2xl sm:text-4xl font-bold text-[#0A2D55] mt-1 sm:mt-2">{stats.totalMappings}</p>
                   </div>
                   <div className="w-11 h-11 sm:w-12 sm:h-12 bg-[#0A2D55]/10 rounded-xl flex items-center justify-center flex-shrink-0">
@@ -4965,7 +5137,7 @@ function Dashboard({
                 ? "opacity-100 bottom-0 right-20"
                 : "opacity-0 bottom-0 right-0 pointer-events-none"
             )}
-            title="Add Mapping"
+            title="Add Record"
           >
             <Plus size={24} strokeWidth={2.5} />
           </button>
@@ -5065,7 +5237,7 @@ function Dashboard({
                     onChange={(e) => setExportFileName(e.target.value)}
                     disabled={isExporting}
                     className="w-full px-4 py-2.5 rounded-xl border border-white/20 bg-white/10 text-white placeholder-white/60 focus:ring-2 focus:ring-[#F2C94C]/40 focus:border-transparent transition"
-                    placeholder="mappings.xlsx"
+                    placeholder="records.xlsx"
                   />
                 </div>
               </div>
@@ -5143,9 +5315,9 @@ function Dashboard({
               </div>
 
               <div className="px-4 sm:px-6 py-4 sm:py-5 text-white/90">
-                <p className="text-sm">Are you sure you want to delete this mapping? This action cannot be undone.</p>
+                <p className="text-sm">Are you sure you want to delete this record? This action cannot be undone.</p>
                 <div className="mt-4 rounded-xl border border-white/15 bg-white/10 p-3 text-xs">
-                  <p className="font-semibold text-white">{deleteTarget.surveyNumber || 'Untitled Mapping'}</p>
+                  <p className="font-semibold text-white">{deleteTarget.surveyNumber || 'Untitled Record'}</p>
                   <p className="text-white/70 mt-1">{deleteTarget.region || '-'} • {deleteTarget.province || '-'}</p>
                 </div>
               </div>
@@ -5211,7 +5383,7 @@ function Dashboard({
                       <Eye size={22} className="text-white" />
                     </div>
                     <div>
-                      <h3 className="text-xl font-bold text-white tracking-tight">Mapping Details</h3>
+                      <h3 className="text-xl font-bold text-white tracking-tight">Record Details</h3>
                       <p className="text-xs text-white/70 mt-0.5">Saved record from the form</p>
                     </div>
                   </div>
@@ -5220,8 +5392,8 @@ function Dashboard({
                       type="button"
                       onClick={() => console.log('Dashboard: selectedMapping ->', selectedMapping)}
                       className="px-3 py-1 rounded-md bg-white/10 text-white hover:bg-white/20 text-xs"
-                      aria-label="Debug mapping"
-                      title="Log mapping to console"
+                      aria-label="Debug record"
+                      title="Log record to console"
                     >
                       Debug
                     </button>
